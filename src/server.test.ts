@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { accessSummary, createServer, formatAccessSummary, toolNamesFor } from "./server.js";
+import {
+  accessSummary,
+  createServer,
+  formatAccessSummary,
+  listProjectCandidates,
+  openWorkspaceDescription,
+  openWorkspaceErrorText,
+  openWorkspacePathDescription,
+  toolNamesFor,
+} from "./server.js";
 import type { ServerConfig } from "./config.js";
 
 const config: ServerConfig = {
@@ -71,6 +80,35 @@ assert.match(formatted, /open_workspace with \{"path":"\/Users\/alice\/work","mo
 
 assert.equal(toolNamesFor(config).workspaceInfo, "workspace_info");
 assert.equal(toolNamesFor({ ...config, toolNaming: "legacy" }).workspaceInfo, "workspace_info");
+assert.equal(toolNamesFor(config).listProjects, "list_projects");
+
+assert.match(openWorkspaceDescription(config, toolNamesFor(config)), /\/Users\/alice\/work/);
+assert.match(openWorkspaceDescription(config, toolNamesFor(config)), /list_projects/);
+assert.match(openWorkspacePathDescription(config), /\/Users\/alice\/work/);
+assert.match(openWorkspacePathDescription(config), /Do not use "~"/);
+assert.match(
+  openWorkspaceErrorText(config, "~", new Error("Path is outside allowed roots: ~"), toolNamesFor(config)),
+  /Call list_projects first/,
+);
+
+const projectsRoot = await mkdtemp(join(tmpdir(), "devspace-projects-test-"));
+try {
+  await mkdir(join(projectsRoot, "alpha-app", ".git"), { recursive: true });
+  await writeFile(join(projectsRoot, "alpha-app", "package.json"), "{}\n");
+  await mkdir(join(projectsRoot, "beta-lib"));
+  await mkdir(join(projectsRoot, ".hidden"));
+
+  const projects = await listProjectCandidates({
+    ...config,
+    allowedRoots: [projectsRoot],
+  });
+
+  assert.deepEqual(projects.map((project) => project.name), ["alpha-app", "beta-lib"]);
+  assert.equal(projects[0]?.path, join(projectsRoot, "alpha-app"));
+  assert.deepEqual(projects[0]?.markers, [".git", "package.json"]);
+} finally {
+  await rm(projectsRoot, { recursive: true, force: true });
+}
 
 const stateDir = await mkdtemp(join(tmpdir(), "devspace-server-test-"));
 const proxiedServer = createServer({

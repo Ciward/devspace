@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { access, realpath } from "node:fs/promises";
+import { readFileSync, type Dirent } from "node:fs";
+import { access, readdir, realpath, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
@@ -151,6 +151,7 @@ function toolWidgetDescriptorMeta(
 interface ToolNames {
   openWorkspace: "open_workspace";
   workspaceInfo: "workspace_info";
+  listProjects: "list_projects";
   read: "read_file" | "read";
   write: "write_file" | "write";
   edit: "edit_file" | "edit";
@@ -177,6 +178,7 @@ export function toolNamesFor(config: ServerConfig): ToolNames {
     ? {
         openWorkspace: "open_workspace",
         workspaceInfo: "workspace_info",
+        listProjects: "list_projects",
         read: "read",
         write: "write",
         edit: "edit",
@@ -188,6 +190,7 @@ export function toolNamesFor(config: ServerConfig): ToolNames {
     : {
         openWorkspace: "open_workspace",
         workspaceInfo: "workspace_info",
+        listProjects: "list_projects",
         read: "read_file",
         write: "write_file",
         edit: "edit_file",
@@ -196,6 +199,13 @@ export function toolNamesFor(config: ServerConfig): ToolNames {
         ls: "list_directory",
         shell: "run_shell",
       };
+}
+
+export interface ProjectCandidate {
+  name: string;
+  path: string;
+  root: string;
+  markers: string[];
 }
 
 export function accessSummary(config: ServerConfig): AccessSummary {
@@ -238,6 +248,93 @@ export function formatAccessSummary(summary: AccessSummary): string {
     examples || "- No workspace examples available.",
     "Only paths under the accessible roots can be opened as workspaces. Shell commands run with the local user's permissions, so keep work scoped to the active workspace unless the user explicitly asks otherwise.",
   ].join("\n");
+}
+
+function formatAllowedRoots(config: ServerConfig): string {
+  return config.allowedRoots.join(", ") || "(none configured)";
+}
+
+export function openWorkspaceDescription(config: ServerConfig, toolNames: ToolNames): string {
+  return [
+    "Open a local project directory as a coding workspace.",
+    `Allowed roots are: ${formatAllowedRoots(config)}.`,
+    `If the user asks what local projects, folders, repositories, or workspaces are available, call ${toolNames.listProjects} first instead of guessing paths.`,
+    "Do not open ~ or arbitrary home-directory guesses; open one allowed root or a project directory under an allowed root.",
+    "Call this once per project folder or worktree before reading, editing, searching, writing, showing changes, or running commands.",
+    "Reuse the returned workspaceId for later calls in the same folder; do not call open_workspace again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen.",
+    "By default this opens the actual checkout; set mode=\"worktree\" when the user asks for an isolated or parallel coding session.",
+    "Returns a workspaceId, loaded root project instructions, nested instruction file paths, and the DevSpace access summary.",
+  ].join(" ");
+}
+
+export function openWorkspacePathDescription(config: ServerConfig): string {
+  return [
+    `Absolute path to a local project directory inside one of these allowed roots: ${formatAllowedRoots(config)}.`,
+    "Do not use \"~\" or guess common folders when the user asks what projects are available; call list_projects first.",
+    "You may pass an allowed root directly to inspect it, or a project/repository directory below an allowed root.",
+  ].join(" ");
+}
+
+export function openWorkspaceErrorText(
+  config: ServerConfig,
+  attemptedPath: string,
+  error: unknown,
+  toolNames: ToolNames,
+): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    `Could not open workspace path: ${attemptedPath}`,
+    message,
+    formatAccessSummary(accessSummary(config)),
+    `Call ${toolNames.listProjects} first if you need to discover available local projects instead of guessing paths.`,
+  ].join("\n");
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function listProjectCandidates(config: ServerConfig): Promise<ProjectCandidate[]> {
+  const candidates: ProjectCandidate[] = [];
+
+  for (const root of config.allowedRoots) {
+    let entries: Dirent<string>[];
+    try {
+      entries = await readdir(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const path = `${root.replace(/\/+$/, "")}/${entry.name}`;
+      const markerChecks = [
+        [".git", await pathExists(`${path}/.git`)],
+        ["package.json", await pathExists(`${path}/package.json`)],
+        ["pyproject.toml", await pathExists(`${path}/pyproject.toml`)],
+        ["Cargo.toml", await pathExists(`${path}/Cargo.toml`)],
+        ["go.mod", await pathExists(`${path}/go.mod`)],
+        ["README.md", await pathExists(`${path}/README.md`)],
+        ["AGENTS.md", await pathExists(`${path}/AGENTS.md`)],
+      ] as const;
+
+      candidates.push({
+        name: entry.name,
+        path,
+        root,
+        markers: markerChecks
+          .filter(([, exists]) => exists)
+          .map(([marker]) => marker),
+      });
+    }
+  }
+
+  return candidates.sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function serverInstructions(config: ServerConfig, toolNames: ToolNames): string {
@@ -295,6 +392,13 @@ const accessSummaryOutputSchema = z.object({
     path: z.string(),
     mode: z.enum(["checkout", "worktree"]),
   })),
+});
+
+const projectCandidateOutputSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  root: z.string(),
+  markers: z.array(z.string()),
 });
 
 const reviewFileOutputSchema = z.object({
@@ -617,17 +721,74 @@ function createMcpServer(
 
   registerAppTool(
     server,
+    toolNames.listProjects,
+    {
+      title: "List projects",
+      description:
+        `List local project/repository directories visible to DevSpace under the allowed roots: ${formatAllowedRoots(config)}. Use this first when the user asks what local projects, folders, repos, repositories, or workspaces are available, instead of guessing "~" or common home-directory paths.`,
+      inputSchema: {},
+      outputSchema: resultOutputSchema({
+        access: accessSummaryOutputSchema,
+        projects: z.array(projectCandidateOutputSchema),
+      }),
+      ...toolWidgetDescriptorMeta(config, "directory"),
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const startedAt = performance.now();
+      const access = accessSummary(config);
+      const projects = await listProjectCandidates(config);
+      const projectLines = projects.length > 0
+        ? projects.map((project) => {
+            const markers = project.markers.length > 0 ? ` (${project.markers.join(", ")})` : "";
+            return `- ${project.path}${markers}`;
+          }).join("\n")
+        : "- No project directories found directly under the allowed roots.";
+      const content = [
+        textBlock([
+          formatAccessSummary(access),
+          "Project candidates directly under allowed roots:",
+          projectLines,
+          "Next step: call open_workspace with one of the listed project paths, or with an allowed root if you need a broader directory scan.",
+        ].join("\n")),
+      ];
+
+      logToolCall(config, {
+        tool: toolNames.listProjects,
+        success: true,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+
+      return {
+        content,
+        _meta: {
+          tool: toolNames.listProjects,
+          card: {
+            summary: {
+              allowedRoots: access.allowedRoots.length,
+              projects: projects.length,
+            },
+          },
+        },
+        structuredContent: {
+          result: contentText(content),
+          access,
+          projects,
+        },
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
     "open_workspace",
     {
       title: "Open workspace",
-      description:
-        "Open a local project directory as a coding workspace. Call this once per project folder or worktree before reading, editing, searching, writing, showing changes, or running commands. Reuse the returned workspaceId for later calls in the same folder; do not call open_workspace again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. By default this opens the actual checkout; set mode=\"worktree\" when the user asks for an isolated or parallel coding session. Returns a workspaceId, loaded root project instructions, and nested instruction file paths the model should read before working in those directories.",
+      description: openWorkspaceDescription(config, toolNames),
       inputSchema: {
         path: z
           .string()
-          .describe(
-            "Absolute path, or a leading-tilde home path such as ~/project, to a local project directory inside an allowed root.",
-          ),
+          .describe(openWorkspacePathDescription(config)),
         mode: z
           .enum(["checkout", "worktree"])
           .optional()
@@ -666,7 +827,27 @@ function createMcpServer(
     },
     async ({ path, mode, baseRef }) => {
       const startedAt = performance.now();
-      const { workspace, agentsFiles, availableAgentsFiles } = await workspaces.openWorkspace({ path, mode, baseRef });
+      let context: Awaited<ReturnType<WorkspaceRegistry["openWorkspace"]>>;
+      try {
+        context = await workspaces.openWorkspace({ path, mode, baseRef });
+      } catch (error) {
+        const content = [textBlock(openWorkspaceErrorText(config, path, error, toolNames))];
+        logFailedToolResponse(config, {
+          tool: "open_workspace",
+          path,
+        }, content, startedAt);
+
+        return {
+          isError: true,
+          content,
+          structuredContent: {
+            result: contentText(content),
+            access: accessSummary(config),
+          },
+        };
+      }
+
+      const { workspace, agentsFiles, availableAgentsFiles } = context;
       if (config.widgets === "changes") {
         void reviewCheckpoints.initializeWorkspace({
           workspaceId: workspace.id,
