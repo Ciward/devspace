@@ -68,6 +68,17 @@ interface RunningServer {
   close(): void;
 }
 
+export interface AccessSummary {
+  publicMcpUrl: string;
+  localMcpUrl: string;
+  allowedRoots: string[];
+  worktreeRoot: string;
+  openWorkspaceExamples: Array<{
+    path: string;
+    mode: "checkout" | "worktree";
+  }>;
+}
+
 type ToolContent =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
@@ -139,6 +150,7 @@ function toolWidgetDescriptorMeta(
 
 interface ToolNames {
   openWorkspace: "open_workspace";
+  workspaceInfo: "workspace_info";
   read: "read_file" | "read";
   write: "write_file" | "write";
   edit: "edit_file" | "edit";
@@ -160,10 +172,11 @@ interface ToolLogFields {
   error?: string;
 }
 
-function toolNamesFor(config: ServerConfig): ToolNames {
+export function toolNamesFor(config: ServerConfig): ToolNames {
   return config.toolNaming === "short"
     ? {
         openWorkspace: "open_workspace",
+        workspaceInfo: "workspace_info",
         read: "read",
         write: "write",
         edit: "edit",
@@ -174,6 +187,7 @@ function toolNamesFor(config: ServerConfig): ToolNames {
       }
     : {
         openWorkspace: "open_workspace",
+        workspaceInfo: "workspace_info",
         read: "read_file",
         write: "write_file",
         edit: "edit_file",
@@ -182,6 +196,48 @@ function toolNamesFor(config: ServerConfig): ToolNames {
         ls: "list_directory",
         shell: "run_shell",
       };
+}
+
+export function accessSummary(config: ServerConfig): AccessSummary {
+  const primaryRoot = config.allowedRoots[0];
+  const checkoutExamples = config.allowedRoots.slice(0, 3).map((path) => ({
+    path,
+    mode: "checkout" as const,
+  }));
+  const worktreeExample = primaryRoot
+    ? [{ path: primaryRoot, mode: "worktree" as const }]
+    : [];
+
+  return {
+    publicMcpUrl: new URL("/mcp", config.publicBaseUrl).toString(),
+    localMcpUrl: `http://${config.host}:${config.port}/mcp`,
+    allowedRoots: config.allowedRoots,
+    worktreeRoot: config.worktreeRoot,
+    openWorkspaceExamples: [...checkoutExamples, ...worktreeExample],
+  };
+}
+
+export function formatAccessSummary(summary: AccessSummary): string {
+  const roots = summary.allowedRoots.map((root) => `- ${root}`).join("\n");
+  const examples = summary.openWorkspaceExamples
+    .map((example) => {
+      const input = example.mode === "checkout"
+        ? { path: example.path }
+        : { path: example.path, mode: example.mode };
+      return `- Call open_workspace with ${JSON.stringify(input)}`;
+    })
+    .join("\n");
+
+  return [
+    "Accessible local workspace roots:",
+    roots || "- No allowed roots configured.",
+    `Public MCP endpoint: ${summary.publicMcpUrl}`,
+    `Local MCP endpoint: ${summary.localMcpUrl}`,
+    `Managed Git worktrees are created under: ${summary.worktreeRoot}`,
+    "Typical starting calls:",
+    examples || "- No workspace examples available.",
+    "Only paths under the accessible roots can be opened as workspaces. Shell commands run with the local user's permissions, so keep work scoped to the active workspace unless the user explicitly asks otherwise.",
+  ].join("\n");
 }
 
 function serverInstructions(config: ServerConfig, toolNames: ToolNames): string {
@@ -200,7 +256,9 @@ function serverInstructions(config: ServerConfig, toolNames: ToolNames): string 
       ? " After creating, editing, or overwriting files, call show_changes once after the related file changes are complete so the user can see the aggregate diff."
       : "";
 
-  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${showChanges}`;
+  const access = formatAccessSummary(accessSummary(config));
+
+  return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${showChanges}`;
 }
 function resultOutputSchema(extra: z.ZodRawShape = {}): z.ZodRawShape {
   return {
@@ -226,6 +284,17 @@ const workspaceAgentsFileOutputSchema = z.object({
 
 const workspaceAvailableAgentsFileOutputSchema = z.object({
   path: z.string(),
+});
+
+const accessSummaryOutputSchema = z.object({
+  publicMcpUrl: z.string(),
+  localMcpUrl: z.string(),
+  allowedRoots: z.array(z.string()),
+  worktreeRoot: z.string(),
+  openWorkspaceExamples: z.array(z.object({
+    path: z.string(),
+    mode: z.enum(["checkout", "worktree"]),
+  })),
 });
 
 const reviewFileOutputSchema = z.object({
@@ -504,6 +573,50 @@ function createMcpServer(
 
   registerAppTool(
     server,
+    toolNames.workspaceInfo,
+    {
+      title: "Workspace info",
+      description:
+        "Show the local DevSpace access summary: allowed workspace roots, public and local MCP endpoints, managed worktree directory, and example open_workspace calls. Use this when the user asks what local projects, folders, paths, or workspaces are available through DevSpace.",
+      inputSchema: {},
+      outputSchema: resultOutputSchema({
+        access: accessSummaryOutputSchema,
+      }),
+      ...toolWidgetDescriptorMeta(config, "workspace"),
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const startedAt = performance.now();
+      const access = accessSummary(config);
+      const content = [textBlock(formatAccessSummary(access))];
+
+      logToolCall(config, {
+        tool: toolNames.workspaceInfo,
+        success: true,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+
+      return {
+        content,
+        _meta: {
+          tool: toolNames.workspaceInfo,
+          card: {
+            summary: {
+              allowedRoots: access.allowedRoots.length,
+              examples: access.openWorkspaceExamples.length,
+            },
+          },
+        },
+        structuredContent: {
+          result: contentText(content),
+          access,
+        },
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
     "open_workspace",
     {
       title: "Open workspace",
@@ -545,6 +658,7 @@ function createMcpServer(
         availableAgentsFiles: z.array(workspaceAvailableAgentsFileOutputSchema),
         skills: z.array(workspaceSkillOutputSchema),
         skillDiagnostics: z.array(z.unknown()),
+        access: accessSummaryOutputSchema,
         instruction: z.string(),
       },
       ...toolWidgetDescriptorMeta(config, "workspace"),
@@ -573,6 +687,8 @@ function createMcpServer(
       const availableAgentsFileOutputs = availableAgentsFiles.map((file) => ({
         path: formatAgentsPath(file.path, workspace.root),
       }));
+      const access = accessSummary(config);
+      const accessText = formatAccessSummary(access);
       const instruction = config.skillsEnabled
         ? "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding."
         : "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.";
@@ -586,6 +702,7 @@ function createMcpServer(
             loadedAgentsFiles.length > 0
               ? `Loaded project instructions: ${loadedAgentsFiles.map((file) => file.path).join(", ")}`
               : undefined,
+            accessText,
             availableAgentsFileOutputs.length > 0
               ? `Available nested instructions: ${availableAgentsFileOutputs.map((file) => file.path).join(", ")}`
               : undefined,
@@ -617,6 +734,7 @@ function createMcpServer(
               availableAgentsFiles: availableAgentsFileOutputs.length,
               skills: visibleSkills.length,
               skillDiagnostics: workspace.skillDiagnostics.length,
+              allowedRoots: access.allowedRoots.length,
             },
           },
         },
@@ -630,6 +748,7 @@ function createMcpServer(
           availableAgentsFiles: availableAgentsFileOutputs,
           skills: visibleSkills,
           skillDiagnostics: workspace.skillDiagnostics,
+          access,
           instruction,
         },
       };
