@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { accessSummary, formatAccessSummary, toolNamesFor } from "./server.js";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { accessSummary, createServer, formatAccessSummary, toolNamesFor } from "./server.js";
 import type { ServerConfig } from "./config.js";
 
 const config: ServerConfig = {
@@ -68,3 +71,18 @@ assert.match(formatted, /open_workspace with \{"path":"\/Users\/alice\/work","mo
 
 assert.equal(toolNamesFor(config).workspaceInfo, "workspace_info");
 assert.equal(toolNamesFor({ ...config, toolNaming: "legacy" }).workspaceInfo, "workspace_info");
+
+const stateDir = await mkdtemp(join(tmpdir(), "devspace-server-test-"));
+const proxiedServer = createServer({
+  ...config,
+  stateDir,
+  logging: {
+    ...config.logging,
+    trustProxy: true,
+  },
+});
+try {
+  assert.equal(proxiedServer.app.get("trust proxy"), "loopback");
+} finally {
+  proxiedServer.close();
+}
