@@ -87,6 +87,16 @@ async function runBody(source: string): Promise<unknown> {
         return Promise.all(thunks.map((t) => t().catch(() => null)));
       },
       pipeline: async (...args: unknown[]) => args[0],
+      settle: async (task) => {
+        try {
+          return { ok: true, value: await task() };
+        } catch (error) {
+          return {
+            ok: false,
+            error: { kind: "internal", message: String(error), retryable: false },
+          };
+        }
+      },
       phase: () => {},
       log: (msg: unknown) => {
         logs.push(String(msg));

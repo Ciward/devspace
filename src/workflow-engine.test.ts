@@ -78,6 +78,61 @@ import { createStubBudget } from "./workflow-types.js";
 }
 
 // ---------------------------------------------------------------------------
+// settle() preserves a typed failure as data without changing parallel defaults
+// ---------------------------------------------------------------------------
+{
+  const dir = await mkdtemp(join(tmpdir(), "wf-settle-"));
+  const store = new WorkflowStore(dir);
+  const run = store.createRun({
+    name: "settle",
+    source: "inline",
+    scriptPath: "inline",
+    scriptHash: "h",
+    workspaceRoot: dir,
+  });
+  const api = createWorkflowApi({
+    runId: run.id,
+    journal: store,
+    meta: { name: "settle", description: "d" },
+    args: undefined,
+    concurrency: 2,
+    signal: new AbortController().signal,
+    workspaceRoot: dir,
+    enabledProviders: ["codex"],
+    runProvider: async (input) => {
+      if (input.prompt === "fail") {
+        throw new WorkflowEngineError("provider_unavailable", "provider missing");
+      }
+      return { finalResponse: `ok:${input.prompt}` };
+    },
+  });
+
+  const ok = await api.settle(() => api.agent("a"));
+  assert.deepEqual(ok, { ok: true, value: "ok:a" });
+
+  const failed = await api.settle(() => api.agent("fail"));
+  assert.deepEqual(failed, {
+    ok: false,
+    error: {
+      kind: "provider_unavailable",
+      message: "provider missing",
+      retryable: true,
+    },
+  });
+  assert.equal(store.getAgentCall(run.id, 1)?.status, "failed");
+
+  const rows = await api.parallel([
+    () => api.settle(() => api.agent("fail")),
+    () => api.settle(() => api.agent("b")),
+  ]);
+  assert.equal(rows[0]?.ok, false);
+  assert.deepEqual(rows[1], { ok: true, value: "ok:b" });
+
+  store.close();
+  await rm(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
 // pipeline — no barrier across items (item B can finish stage2 before A stage1 ends)
 // ---------------------------------------------------------------------------
 {

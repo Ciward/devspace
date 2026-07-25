@@ -82,6 +82,20 @@ export interface WorkflowAgent {
 
 export type WorkflowTask<T = unknown> = () => T | Promise<T>;
 
+export interface WorkflowSettledError {
+  kind: WorkflowErrorKind;
+  message: string;
+  retryable: boolean;
+}
+
+export type WorkflowSettledResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: WorkflowSettledError };
+
+export interface WorkflowSettle {
+  <T>(task: WorkflowTask<T>): Promise<WorkflowSettledResult<Awaited<T>>>;
+}
+
 export interface WorkflowParallel {
   <const T extends readonly WorkflowTask[]>(
     tasks: T,

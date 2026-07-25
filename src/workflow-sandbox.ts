@@ -8,6 +8,7 @@ import type {
   WorkflowNested,
   WorkflowParallel,
   WorkflowPipeline,
+  WorkflowSettle,
 } from "./workflow-types.js";
 
 export class WorkflowDeterminismError extends Error {
@@ -21,6 +22,7 @@ export interface WorkflowSandboxApi {
   agent: WorkflowAgent;
   parallel: WorkflowParallel;
   pipeline: WorkflowPipeline;
+  settle: WorkflowSettle;
   phase: (title: string) => void;
   log: (...args: unknown[]) => unknown;
   args: JsonValue | undefined;
@@ -71,6 +73,7 @@ export async function runWorkflowSandbox(
     agent: api.agent,
     parallel: api.parallel,
     pipeline: api.pipeline,
+    settle: api.settle,
     phase: api.phase,
     log: api.log,
     args: api.args,

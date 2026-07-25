@@ -160,6 +160,7 @@ async function executeNestedOnApi(input: {
     agent: input.parentApi.agent,
     parallel: input.parentApi.parallel,
     pipeline: input.parentApi.pipeline,
+    settle: input.parentApi.settle,
     phase: input.parentApi.phase,
     log: input.parentApi.log,
     args: input.args,

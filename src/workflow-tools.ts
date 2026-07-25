@@ -41,6 +41,7 @@ Workflow scripts (JS only):
   agent(prompt, { label?, phase?, schema?, model?, effort?, provider?, isolation?: 'worktree' })
   parallel(thunks) → Array<T|null>   // barrier; throw → null
   pipeline(items, ...stages)        // no cross-item barrier
+  settle(() => operation) → { ok, value } | { ok, error }
   phase(title); log(msg); args
   workflow(name | { scriptPath }, args?)  // nest depth 1
 Bans: Date.now(), Math.random(), new Date() without args.

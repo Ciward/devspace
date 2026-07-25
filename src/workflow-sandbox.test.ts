@@ -12,6 +12,16 @@ function api(meta: WorkflowMeta, logs?: string[]): WorkflowSandboxApi {
     agent: async () => "",
     parallel: async () => [],
     pipeline: async () => [],
+    settle: async <T>(task: () => T | Promise<T>) => {
+      try {
+        return { ok: true, value: await task() };
+      } catch (error) {
+        return {
+          ok: false,
+          error: { kind: "internal", message: String(error), retryable: false },
+        };
+      }
+    },
     phase: () => {},
     log: (msg: unknown) => {
       logs?.push(String(msg));

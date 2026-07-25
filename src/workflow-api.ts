@@ -17,6 +17,10 @@ import {
   type WorkflowMeta,
 } from "./workflow-types.js";
 import { agentOptsSchema } from "./workflow-contracts.js";
+import {
+  isWorkflowOperationError,
+  serializeWorkflowError,
+} from "./workflow-errors.js";
 
 // ---------------------------------------------------------------------------
 // Host deps (injected by engine; fakes OK in tests)
@@ -574,6 +578,18 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
     );
   };
 
+  const settle = async (...args: unknown[]): Promise<unknown> => {
+    const task = args[0];
+    if (typeof task !== "function") {
+      throw new WorkflowEngineError("internal", "settle(task) requires a function");
+    }
+    try {
+      return { ok: true, value: await (task as () => unknown | Promise<unknown>)() };
+    } catch (error) {
+      return { ok: false, error: normalizeSettledError(error) };
+    }
+  };
+
   const phase = (...args: unknown[]): void => {
     const title = args[0];
     if (typeof title !== "string" || !title.trim()) {
@@ -628,6 +644,7 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
     agent: agent as WorkflowSandboxApi["agent"],
     parallel: parallel as WorkflowSandboxApi["parallel"],
     pipeline: pipeline as WorkflowSandboxApi["pipeline"],
+    settle: settle as WorkflowSandboxApi["settle"],
     phase: phase as WorkflowSandboxApi["phase"],
     log: log as WorkflowSandboxApi["log"],
     args: deps.args,
@@ -636,6 +653,42 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
     meta: deps.meta,
     getCallCount: () => callIndex,
     getNestDepth: () => nestDepth,
+  };
+}
+
+function normalizeSettledError(error: unknown): {
+  kind: import("./workflow-types.js").WorkflowErrorKind;
+  message: string;
+  retryable: boolean;
+} {
+  if (error instanceof WorkflowEngineError) {
+    return {
+      kind: error.kind,
+      message: error.message,
+      retryable:
+        error.kind === "provider_unavailable" ||
+        error.kind === "provider_disabled" ||
+        error.kind === "no_provider",
+    };
+  }
+  if (isWorkflowOperationError(error)) {
+    const serialized = serializeWorkflowError(error);
+    return {
+      kind: serialized.kind,
+      message: serialized.message,
+      retryable: serialized.retryable,
+    };
+  }
+  if (error && typeof error === "object" && "name" in error) {
+    const name = String((error as { name: unknown }).name);
+    if (name === "AbortError") {
+      return { kind: "cancelled", message: "Workflow cancelled", retryable: false };
+    }
+  }
+  return {
+    kind: "internal",
+    message: error instanceof Error ? error.message : String(error),
+    retryable: false,
   };
 }
 

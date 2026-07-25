@@ -58,7 +58,7 @@ export function parseWorkflowScript(
 
   // Inject host APIs as params. `meta` stays as the script's own `const meta`
   // (would TDZ/redeclare if also injected). `console` lives on the sandbox globals.
-  const wrapped = `(async ({ agent, parallel, pipeline, phase, log, args, budget, workflow }) => {\n${body}\n})`;
+  const wrapped = `(async ({ agent, parallel, pipeline, settle, phase, log, args, budget, workflow }) => {\n${body}\n})`;
   let script: vm.Script;
   try {
     script = new vm.Script(wrapped, {
