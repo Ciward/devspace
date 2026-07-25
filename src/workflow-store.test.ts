@@ -67,12 +67,15 @@ try {
     runId: run.id,
     callIndex: 0,
     cacheKey: "key-a",
+    prompt: "review",
+    schemaJson: JSON.stringify({ type: "object" }),
     provider: "codex",
     model: "gpt-5.4",
     effort: "high",
     phase: "Review",
     isolation: "worktree",
     worktreePath: "/tmp/wt",
+    replayReason: "identity_changed:prompt",
   });
   store.completeAgentCall({
     runId: run.id,
@@ -88,15 +91,24 @@ try {
   assert.equal(call?.dirty, true);
   assert.equal(call?.providerSessionId, "sess_1");
   assert.equal(call?.effort, "high");
+  assert.equal(call?.prompt, "review");
+  assert.equal(call?.replayReason, "identity_changed:prompt");
 
   store.beginAgentCall({
     runId: run.id,
     callIndex: 1,
     cacheKey: "key-b",
+    prompt: "review two",
     provider: "claude",
   });
-  store.failAgentCall({ runId: run.id, callIndex: 1, error: "boom" });
+  store.failAgentCall({
+    runId: run.id,
+    callIndex: 1,
+    error: "boom",
+    errorKind: "provider",
+  });
   assert.equal(store.getAgentCall(run.id, 1)?.status, "failed");
+  assert.equal(store.getAgentCall(run.id, 1)?.errorKind, "provider");
   assert.equal(store.listAgentCalls(run.id).length, 2);
 
   const cancelled = store.requestCancel(run.id);

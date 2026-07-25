@@ -196,6 +196,9 @@ export const workflowEventPayloadSchemas = {
       callIndex: z.number().int().nonnegative(),
       cacheKey: z.string(),
       provider: localAgentProviderSchema,
+      replayMatch: z.enum(["same_index", "compatible_key"]),
+      replayedFromRunId: z.string(),
+      replayedFromCallIndex: z.number().int().nonnegative(),
     })
     .strict(),
   schema_retry: z

@@ -50,6 +50,8 @@ export interface BeginAgentCallInput {
   runId: string;
   callIndex: number;
   cacheKey: string;
+  prompt: string;
+  schemaJson?: string;
   provider: string;
   model?: string;
   effort?: string;
@@ -57,6 +59,10 @@ export interface BeginAgentCallInput {
   phase?: string;
   isolation?: AgentIsolationMode;
   worktreePath?: string;
+  replayMatch?: "same_index" | "compatible_key";
+  replayedFromRunId?: string;
+  replayedFromCallIndex?: number;
+  replayReason?: string;
 }
 
 export interface CompleteAgentCallInput {
@@ -74,6 +80,7 @@ export interface FailAgentCallInput {
   runId: string;
   callIndex: number;
   error: string;
+  errorKind?: WorkflowErrorKind;
   worktreePath?: string;
   dirty?: boolean;
 }
@@ -132,6 +139,8 @@ interface WorkflowAgentCallRow {
   run_id: string;
   call_index: number;
   cache_key: string;
+  prompt: string;
+  schema_json: string | null;
   provider: string;
   model: string | null;
   effort: string | null;
@@ -143,6 +152,11 @@ interface WorkflowAgentCallRow {
   response_text: string | null;
   structured_json: string | null;
   error: string | null;
+  error_kind: string | null;
+  replay_match: string | null;
+  replayed_from_run_id: string | null;
+  replayed_from_call_index: number | null;
+  replay_reason: string | null;
   isolation: string;
   worktree_path: string | null;
   dirty: string | null;
@@ -562,14 +576,18 @@ export class WorkflowStore {
     this.database.sqlite
       .prepare(
         `insert into workflow_agent_calls (
-          run_id, call_index, cache_key, provider, model, effort, label, phase,
-          status, from_cache, isolation, worktree_path, created_at, started_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, 'running', 'false', ?, ?, ?, ?, ?)`,
+          run_id, call_index, cache_key, prompt, schema_json, provider, model, effort, label, phase,
+          status, from_cache, isolation, worktree_path, replay_match,
+          replayed_from_run_id, replayed_from_call_index, replay_reason,
+          created_at, started_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', 'false', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.runId,
         input.callIndex,
         input.cacheKey,
+        input.prompt,
+        input.schemaJson ?? null,
         input.provider,
         input.model ?? null,
         input.effort ?? null,
@@ -577,6 +595,10 @@ export class WorkflowStore {
         input.phase ?? null,
         isolation,
         input.worktreePath ?? null,
+        input.replayMatch ?? null,
+        input.replayedFromRunId ?? null,
+        input.replayedFromCallIndex ?? null,
+        input.replayReason ?? null,
         now,
         now,
         now,
@@ -630,6 +652,7 @@ export class WorkflowStore {
         `update workflow_agent_calls set
           status = 'failed',
           error = ?,
+          error_kind = ?,
           worktree_path = coalesce(?, worktree_path),
           dirty = ?,
           completed_at = ?,
@@ -638,6 +661,7 @@ export class WorkflowStore {
       )
       .run(
         input.error,
+        input.errorKind ?? "internal",
         input.worktreePath ?? null,
         input.dirty === undefined ? null : input.dirty ? "true" : "false",
         now,
@@ -756,6 +780,8 @@ function rowToAgentCall(row: WorkflowAgentCallRow): WorkflowAgentCallRecord {
     runId: row.run_id,
     callIndex: row.call_index,
     cacheKey: row.cache_key,
+    prompt: row.prompt,
+    schemaJson: row.schema_json ?? undefined,
     provider: localAgentProviderSchema.parse(row.provider),
     model: row.model ?? undefined,
     effort: row.effort ?? undefined,
@@ -767,6 +793,14 @@ function rowToAgentCall(row: WorkflowAgentCallRow): WorkflowAgentCallRecord {
     responseText: row.response_text ?? undefined,
     structuredJson: row.structured_json ?? undefined,
     error: row.error ?? undefined,
+    errorKind: (row.error_kind as WorkflowErrorKind | null) ?? undefined,
+    replayMatch:
+      row.replay_match === "same_index" || row.replay_match === "compatible_key"
+        ? row.replay_match
+        : undefined,
+    replayedFromRunId: row.replayed_from_run_id ?? undefined,
+    replayedFromCallIndex: row.replayed_from_call_index ?? undefined,
+    replayReason: row.replay_reason ?? undefined,
     isolation: row.isolation === "worktree" ? "worktree" : "shared",
     worktreePath: row.worktree_path ?? undefined,
     dirty: row.dirty === null ? undefined : row.dirty === "true",

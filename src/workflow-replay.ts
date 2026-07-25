@@ -1,5 +1,10 @@
 import type { WorkflowAgentCallRecord } from "./workflow-types.js";
-import type { WorkflowReplay, WorkflowReplayHit } from "./workflow-api.js";
+import type {
+  WorkflowReplay,
+  WorkflowReplayDecision,
+  WorkflowReplayHit,
+} from "./workflow-api.js";
+import type { AgentCacheKeyInput } from "./workflow-types.js";
 import { parseJsonText } from "./json-types.js";
 import { WorkflowStoredDataError } from "./workflow-errors.js";
 
@@ -26,20 +31,46 @@ export function createWorkflowReplay(
   const consumed = new Set<string>(); // `${callIndex}` of prior rows consumed
 
   return {
-    match(callIndex: number, cacheKey: string): WorkflowReplayHit | null {
+    decide(
+      callIndex: number,
+      cacheKey: string,
+      input: AgentCacheKeyInput,
+    ): WorkflowReplayDecision {
       const exact = byIndex.get(callIndex);
       if (exact && exact.cacheKey === cacheKey && !consumed.has(indexKey(exact))) {
         consumed.add(indexKey(exact));
         removeFromKeyQueue(byKeyQueue, exact);
-        return toHit(exact);
+        return { hit: toHit(exact, "same_index") };
       }
 
       const queue = byKeyQueue.get(cacheKey);
-      if (!queue || queue.length === 0) return null;
-      const next = queue.shift()!;
-      consumed.add(indexKey(next));
-      if (queue.length === 0) byKeyQueue.delete(cacheKey);
-      return toHit(next);
+      if (queue && queue.length > 0) {
+        const next = queue.shift()!;
+        consumed.add(indexKey(next));
+        if (queue.length === 0) byKeyQueue.delete(cacheKey);
+        return { hit: toHit(next, "compatible_key") };
+      }
+
+      const priorAtIndex = priorCalls.find((call) => call.callIndex === callIndex);
+      if (priorAtIndex) {
+        if (priorAtIndex.status !== "completed" && priorAtIndex.status !== "from_cache") {
+          return { miss: { reason: "prior_call_not_replayable" } };
+        }
+        if (priorAtIndex.cacheKey !== cacheKey) {
+          return {
+            miss: {
+              reason: "identity_changed",
+              changedFields: changedIdentityFields(priorAtIndex, input),
+            },
+          };
+        }
+        return { miss: { reason: "compatible_result_consumed" } };
+      }
+
+      if (priorCalls.some((call) => call.cacheKey === cacheKey)) {
+        return { miss: { reason: "compatible_result_consumed" } };
+      }
+      return { miss: { reason: "no_compatible_call" } };
     },
   };
 }
@@ -61,7 +92,15 @@ function removeFromKeyQueue(
   if (queue.length === 0) map.delete(call.cacheKey);
 }
 
-function toHit(call: WorkflowAgentCallRecord): WorkflowReplayHit {
+function toHit(
+  call: WorkflowAgentCallRecord,
+  replayMatch: WorkflowReplayHit["replayMatch"],
+): WorkflowReplayHit {
+  const provenance = {
+    replayMatch,
+    replayedFromRunId: call.runId,
+    replayedFromCallIndex: call.callIndex,
+  } as const;
   if (call.structuredJson) {
     try {
       return {
@@ -69,6 +108,7 @@ function toHit(call: WorkflowAgentCallRecord): WorkflowReplayHit {
         responseText: call.responseText,
         structuredJson: call.structuredJson,
         providerSessionId: call.providerSessionId,
+        ...provenance,
       };
     } catch (cause) {
       throw new WorkflowStoredDataError(
@@ -82,5 +122,22 @@ function toHit(call: WorkflowAgentCallRecord): WorkflowReplayHit {
     responseText: call.responseText,
     structuredJson: call.structuredJson,
     providerSessionId: call.providerSessionId,
+    ...provenance,
   };
+}
+
+function changedIdentityFields(
+  prior: WorkflowAgentCallRecord,
+  current: AgentCacheKeyInput,
+): Array<keyof AgentCacheKeyInput> {
+  const changed: Array<keyof AgentCacheKeyInput> = [];
+  if (prior.prompt !== current.prompt) changed.push("prompt");
+  if (prior.provider !== current.provider) changed.push("provider");
+  if ((prior.model ?? null) !== current.model) changed.push("model");
+  if ((prior.effort ?? null) !== current.effort) changed.push("effort");
+  const priorSchema = prior.schemaJson ? JSON.stringify(parseJsonText(prior.schemaJson)) : null;
+  const currentSchema = current.schema === null ? null : JSON.stringify(current.schema);
+  if (priorSchema !== currentSchema) changed.push("schema");
+  if (prior.isolation !== current.isolation) changed.push("isolation");
+  return changed.length > 0 ? changed : ["prompt"];
 }

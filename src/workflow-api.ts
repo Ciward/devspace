@@ -11,6 +11,7 @@ import {
   buildAgentCacheKeyInput,
   createStubBudget,
   type AgentIsolationMode,
+  type AgentCacheKeyInput,
   type AgentOpts,
   type AppendWorkflowEventInput,
   type WorkflowMeta,
@@ -64,10 +65,30 @@ export interface WorkflowReplayHit {
   responseText?: string;
   structuredJson?: string;
   providerSessionId?: string;
+  replayMatch: "same_index" | "compatible_key";
+  replayedFromRunId: string;
+  replayedFromCallIndex: number;
 }
 
+export interface WorkflowReplayMiss {
+  reason:
+    | "no_compatible_call"
+    | "prior_call_not_replayable"
+    | "compatible_result_consumed"
+    | "identity_changed";
+  changedFields?: Array<keyof AgentCacheKeyInput>;
+}
+
+export type WorkflowReplayDecision =
+  | { hit: WorkflowReplayHit; miss?: never }
+  | { hit?: never; miss: WorkflowReplayMiss };
+
 export interface WorkflowReplay {
-  match(callIndex: number, cacheKey: string): WorkflowReplayHit | null;
+  decide(
+    callIndex: number,
+    cacheKey: string,
+    input: AgentCacheKeyInput,
+  ): WorkflowReplayDecision;
 }
 
 export interface WorkflowJournal {
@@ -78,6 +99,8 @@ export interface WorkflowJournal {
     runId: string;
     callIndex: number;
     cacheKey: string;
+    prompt: string;
+    schemaJson?: string;
     provider: LocalAgentProvider;
     model?: string;
     effort?: string;
@@ -85,6 +108,10 @@ export interface WorkflowJournal {
     phase?: string;
     isolation?: AgentIsolationMode;
     worktreePath?: string;
+    replayMatch?: "same_index" | "compatible_key";
+    replayedFromRunId?: string;
+    replayedFromCallIndex?: number;
+    replayReason?: string;
   }): unknown;
   completeAgentCall(input: {
     runId: string;
@@ -100,6 +127,7 @@ export interface WorkflowJournal {
     runId: string;
     callIndex: number;
     error: string;
+    errorKind?: import("./workflow-types.js").WorkflowErrorKind;
     worktreePath?: string;
     dirty?: boolean;
   }): unknown;
@@ -233,19 +261,24 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
     });
     const cacheKey = hashCacheKey(cacheKeyInput);
 
-    if (deps.replay) {
-      const hit = deps.replay.match(index, cacheKey);
-      if (hit) {
+    const replayDecision = deps.replay?.decide(index, cacheKey, cacheKeyInput);
+    if (replayDecision?.hit) {
+      const hit = replayDecision.hit;
         deps.journal.beginAgentCall({
           runId: deps.runId,
           callIndex: index,
           cacheKey,
+          prompt,
+          schemaJson: agentOpts.schema ? JSON.stringify(agentOpts.schema) : undefined,
           provider,
           model: agentOpts.model,
           effort: agentOpts.effort,
           label: agentOpts.label,
           phase,
           isolation,
+          replayMatch: hit.replayMatch,
+          replayedFromRunId: hit.replayedFromRunId,
+          replayedFromCallIndex: hit.replayedFromCallIndex,
         });
         deps.journal.completeAgentCall({
           runId: deps.runId,
@@ -260,10 +293,16 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
           type: "agent_call_cached",
           phase,
           label: agentOpts.label,
-          data: { callIndex: index, cacheKey, provider },
+          data: {
+            callIndex: index,
+            cacheKey,
+            provider,
+            replayMatch: hit.replayMatch,
+            replayedFromRunId: hit.replayedFromRunId,
+            replayedFromCallIndex: hit.replayedFromCallIndex,
+          },
         });
         return hit.value;
-      }
     }
 
     await semaphore.acquire(deps.signal);
@@ -300,6 +339,8 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
         runId: deps.runId,
         callIndex: index,
         cacheKey,
+        prompt,
+        schemaJson: agentOpts.schema ? JSON.stringify(agentOpts.schema) : undefined,
         provider,
         model: agentOpts.model,
         effort: agentOpts.effort,
@@ -307,6 +348,9 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
         phase,
         isolation,
         worktreePath,
+        replayReason: replayDecision?.miss
+          ? formatReplayMiss(replayDecision.miss)
+          : undefined,
       });
       agentCallBegun = true;
       deps.journal.appendEvent({
@@ -453,6 +497,7 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
           runId: deps.runId,
           callIndex: index,
           error: message,
+          errorKind: error instanceof WorkflowEngineError ? error.kind : "internal",
           worktreePath,
         });
       }
@@ -592,6 +637,12 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
     getCallCount: () => callIndex,
     getNestDepth: () => nestDepth,
   };
+}
+
+function formatReplayMiss(miss: WorkflowReplayMiss): string {
+  return miss.reason === "identity_changed" && miss.changedFields?.length
+    ? `${miss.reason}:${miss.changedFields.join(",")}`
+    : miss.reason;
 }
 
 /** Test helper: read current ALS phase (undefined outside phase). */

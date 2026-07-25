@@ -8,6 +8,7 @@ function call(
 ): WorkflowAgentCallRecord {
   return {
     runId: "wfr_prior",
+    prompt: "prompt",
     provider: "codex",
     status: "completed",
     fromCache: false,
@@ -18,14 +19,25 @@ function call(
   };
 }
 
+function identity(prompt = "prompt") {
+  return {
+    prompt,
+    provider: "codex" as const,
+    model: null,
+    effort: null,
+    schema: null,
+    isolation: "shared" as const,
+  };
+}
+
 {
   const replay = createWorkflowReplay([
     call({ callIndex: 0, cacheKey: "k0", responseText: "a" }),
     call({ callIndex: 1, cacheKey: "k1", responseText: "b" }),
   ]);
-  assert.equal(replay.match(0, "k0")?.value, "a");
-  assert.equal(replay.match(1, "k1")?.value, "b");
-  assert.equal(replay.match(2, "k0"), null);
+  assert.equal(replay.decide(0, "k0", identity()).hit?.value, "a");
+  assert.equal(replay.decide(1, "k1", identity()).hit?.value, "b");
+  assert.equal(replay.decide(2, "k0", identity()).miss?.reason, "compatible_result_consumed");
 }
 
 {
@@ -35,9 +47,14 @@ function call(
     call({ callIndex: 1, cacheKey: "kb", responseText: "B" }),
   ]);
   // new run asks index0 for kb first
-  assert.equal(replay.match(0, "kb")?.value, "B");
-  assert.equal(replay.match(1, "ka")?.value, "A");
-  assert.equal(replay.match(2, "ka"), null);
+  const reorderedB = replay.decide(0, "kb", identity()).hit;
+  assert.equal(reorderedB?.value, "B");
+  assert.equal(reorderedB?.replayMatch, "compatible_key");
+  assert.equal(replay.decide(1, "ka", identity()).hit?.value, "A");
+  assert.equal(
+    replay.decide(2, "ka", identity()).miss?.reason,
+    "compatible_result_consumed",
+  );
 }
 
 {
@@ -49,7 +66,16 @@ function call(
       structuredJson: '{"ok":true}',
     }),
   ]);
-  assert.deepEqual(replay.match(0, "ks")?.value, { ok: true });
+  assert.deepEqual(replay.decide(0, "ks", identity()).hit?.value, { ok: true });
+}
+
+{
+  const replay = createWorkflowReplay([
+    call({ callIndex: 0, cacheKey: "old", prompt: "old prompt", responseText: "a" }),
+  ]);
+  const miss = replay.decide(0, "new", identity("new prompt")).miss;
+  assert.equal(miss?.reason, "identity_changed");
+  assert.deepEqual(miss?.changedFields, ["prompt"]);
 }
 
 console.log("workflow-replay.test.ts: ok");

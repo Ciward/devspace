@@ -32,6 +32,11 @@ const migrations: Migration[] = [
     name: "workflow-journal",
     up: migrateWorkflowJournal,
   },
+  {
+    version: 6,
+    name: "workflow-replay-provenance",
+    up: migrateWorkflowReplayProvenance,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -282,9 +287,24 @@ function migrateWorkflowJournal(sqlite: Database.Database): void {
   `);
 }
 
+function migrateWorkflowReplayProvenance(sqlite: Database.Database): void {
+  addColumnIfMissing(sqlite, "workflow_agent_calls", "prompt", "text not null default ''");
+  addColumnIfMissing(sqlite, "workflow_agent_calls", "schema_json", "text");
+  addColumnIfMissing(sqlite, "workflow_agent_calls", "error_kind", "text");
+  addColumnIfMissing(sqlite, "workflow_agent_calls", "replay_match", "text");
+  addColumnIfMissing(sqlite, "workflow_agent_calls", "replayed_from_run_id", "text");
+  addColumnIfMissing(sqlite, "workflow_agent_calls", "replayed_from_call_index", "integer");
+  addColumnIfMissing(sqlite, "workflow_agent_calls", "replay_reason", "text");
+
+  sqlite.exec(`
+    create index if not exists workflow_agent_calls_replay_source_idx
+      on workflow_agent_calls(replayed_from_run_id, replayed_from_call_index);
+  `);
+}
+
 function addColumnIfMissing(
   sqlite: Database.Database,
-  table: "workspace_sessions" | "local_agent_sessions",
+  table: "workspace_sessions" | "local_agent_sessions" | "workflow_agent_calls",
   column: string,
   definition: string,
 ): void {

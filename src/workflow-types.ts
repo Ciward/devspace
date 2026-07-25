@@ -137,6 +137,8 @@ export interface WorkflowAgentCallRecord {
   runId: string;
   callIndex: number;
   cacheKey: string;
+  prompt: string;
+  schemaJson?: string;
   provider: AgentProviderId;
   model?: string;
   effort?: string;
@@ -148,6 +150,11 @@ export interface WorkflowAgentCallRecord {
   responseText?: string;
   structuredJson?: string;
   error?: string;
+  errorKind?: WorkflowErrorKind;
+  replayMatch?: "same_index" | "compatible_key";
+  replayedFromRunId?: string;
+  replayedFromCallIndex?: number;
+  replayReason?: string;
   isolation: AgentIsolationMode;
   worktreePath?: string;
   dirty?: boolean;
