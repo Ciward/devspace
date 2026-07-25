@@ -83,7 +83,7 @@ sessions.
 
 | Value | Behavior |
 | --- | --- |
-| `full` | Default. Widget UI is attached to exposed workspace, file, edit, and shell tools. |
+| `full` | Default. Widget UI is attached to exposed workspace, workflow, file, edit, and shell tools, including read-only live workflow dashboards. |
 | `changes` | Enables the aggregate `show_changes` tool and attaches widget UI to `open_workspace` and `show_changes`. |
 | `off` | Disables widget UI. |
 

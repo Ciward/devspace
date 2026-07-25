@@ -117,7 +117,7 @@ depending on a replayed mutating call.
 
 - **CLI**: host agent can shell; prefer for long runs + `--follow`.
 - **TUI**: `devspace workflow tui` opens a read-only live view for workflows associated with the current working directory.
-- **MCP**: ChatGPT plans; call `run_workflow`, then `workflow_status` until terminal. Disconnecting MCP does **not** kill the worker.
+- **MCP**: ChatGPT plans; call `run_workflow`, then `workflow_status` until terminal. With full widgets enabled, workflow tool cards and the `open_workspace` dashboard show read-only live activity, including workflows launched through the CLI. Disconnecting MCP does **not** kill the worker.
 
 ## Worked mini-examples
 

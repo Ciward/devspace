@@ -148,12 +148,22 @@ registered. `exec_command` returns a process session ID when a command is still
 running after its yield window. Use `write_stdin` to poll it, send input, resize
 a PTY, or send Ctrl-C. Set `tty: true` only for commands that need a terminal.
 
-## Show Changes
+## Widget UI and Show Changes
 
 By default, `DEVSPACE_WIDGETS=full`.
 
-In that mode, DevSpace attaches widget UI to the exposed workspace, file, edit,
-and shell tools. The aggregate `show_changes` tool is not exposed by default.
+In that mode, DevSpace attaches widget UI to the exposed workspace, workflow,
+file, edit, and shell tools. The `open_workspace` dropdown presents the opened
+root, loaded skills and instructions, available agent providers/profiles, and
+currently active workflows for that workspace.
+
+Dynamic Workflow views are read-only. They refresh through app-only MCP tools
+and show observed phases, agent calls, replay state, worktree isolation, errors,
+and recent activity. When the host supports MCP Apps fullscreen display mode,
+the card offers an **Open dashboard** presentation control. It does not add
+cancel, resume, apply, or cleanup actions.
+
+The aggregate `show_changes` tool is not exposed by default.
 
 Use `DEVSPACE_WIDGETS=off` to disable widget UI, or `DEVSPACE_WIDGETS=changes`
 to expose the aggregate show-changes flow.
