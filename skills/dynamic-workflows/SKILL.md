@@ -17,11 +17,14 @@ review, migrate-and-verify, research panels — **not** a single subagent turn.
 
 ```bash
 devspace workflow run --file path/to/script.js [--arg k=v]... [--follow]
+devspace workflow run --script-path path/to/script.js [--resume <runId>] [--follow]
 devspace workflow run --name review-auth [--follow]
 devspace workflow run --resume <runId>
 devspace workflow status <runId> [--follow]
 devspace workflow cancel <runId>
 devspace workflow ls
+devspace workflow calls <runId>
+devspace workflow call <runId> <callIndex>
 ```
 
 Named scripts: `.devspace/workflows/<name>.js` or `workflows/<name>.js`.
@@ -57,7 +60,6 @@ return { summary, findings }
 | `pipeline(items, ...stages)` | Per-item chains; no cross-item barrier |
 | `phase(title)` / `log(msg)` | Progress; journaled |
 | `args` | Run input (object preferred) |
-| `budget` | Stub: `total: null`, `remaining(): Infinity` — do not loop on budget alone |
 | `workflow(name\|{scriptPath}, args?)` | Nested, depth 1, shared call index |
 
 **No `writeMode`.** Teach read-only vs write in the prompt. Use `isolation: 'worktree'` when parallel mutators would conflict (git required).
@@ -86,7 +88,25 @@ Default: first **enabled ∩ available** provider (`agentProviders.enabled` in c
 
 ### Resume
 
-`devspace workflow run --resume <runId>` creates a **new** run that replays completed agent calls by cache key (callIndex+key, then consume-once by key).
+Failed and cancelled runs are terminal. Recovery creates a **new** run:
+
+1. Inspect the prior run with `workflow status`, `workflow calls`, and
+   `workflow call`.
+2. Edit the persisted `scriptPath` reported by the run, or pass a different
+   `--script-path`.
+3. Keep prompts and agent options stable for completed calls whose return values
+   should be reused.
+4. Run `devspace workflow run --resume <runId>` (optionally with
+   `--script-path <path>`).
+
+Replay first matches the same call index and cache key, then consumes one
+compatible prior cache key after reordering. The new run records whether each
+call was reused by same-index or compatible-key matching, and where it came
+from. Failed, interrupted, changed, or unmatched calls execute live.
+
+Replay restores an agent's **return value**. It does not recreate shared-checkout
+edits or reapply a prior worktree diff. Verify required filesystem state before
+depending on a replayed mutating call.
 
 ### Cancel
 
