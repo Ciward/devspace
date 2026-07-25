@@ -13,6 +13,10 @@ import {
 } from "./workflow-api.js";
 import { createStubBudget } from "./workflow-types.js";
 import { WorkflowScriptRuntimeError } from "./workflow-errors.js";
+import {
+  ProviderExecutionError,
+  ProviderUnavailableError,
+} from "./local-agent-errors.js";
 
 // ---------------------------------------------------------------------------
 // Semaphore
@@ -73,6 +77,101 @@ import { WorkflowScriptRuntimeError } from "./workflow-errors.js";
   ]);
   assert.deepEqual(results, ["ok:a", null, "ok:b"]);
   assert.equal(api.getCallCount(), 3);
+  store.close();
+  await rm(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// Script-visible error contract: try/catch, provider fallback, parallel helper
+// ---------------------------------------------------------------------------
+{
+  const dir = await mkdtemp(join(tmpdir(), "wf-script-errors-"));
+  const store = new WorkflowStore(dir);
+  const run = store.createRun({
+    name: "script-errors",
+    source: "inline",
+    scriptPath: "inline",
+    scriptHash: "h",
+    workspaceRoot: dir,
+  });
+
+  const { result } = await executeWorkflow({
+    source: `
+export const meta = { name: 'script-errors', description: 'd' }
+
+async function attempt(task) {
+  try {
+    return { ok: true, value: await task() }
+  } catch (error) {
+    return {
+      ok: false,
+      error: {
+        name: error.name,
+        kind: error.kind,
+        message: error.message,
+        retryable: error.retryable,
+      },
+    }
+  }
+}
+
+let primary
+try {
+  primary = await agent('primary', { provider: 'claude' })
+} catch (error) {
+  if (error.kind !== 'provider_unavailable') throw error
+  primary = await agent('fallback', { provider: 'codex' })
+}
+
+const reviews = await parallel([
+  () => attempt(() => agent('retryable-failure', { provider: 'codex' })),
+  () => attempt(() => agent('success', { provider: 'codex' })),
+])
+
+return { primary, reviews }
+`,
+    runId: run.id,
+    journal: store,
+    workspaceRoot: dir,
+    enabledProviders: ["claude", "codex"],
+    runProvider: async (input) => {
+      if (input.prompt === "primary") {
+        throw new ProviderUnavailableError("claude", "Claude is unavailable");
+      }
+      if (input.prompt === "retryable-failure") {
+        throw new ProviderExecutionError({
+          provider: "codex",
+          cause: new Error("temporary provider failure"),
+          retryable: true,
+        });
+      }
+      return { finalResponse: `ok:${input.prompt}` };
+    },
+  });
+
+  assert.deepEqual(result, {
+    primary: "ok:fallback",
+    reviews: [
+      {
+        ok: false,
+        error: {
+          name: "WorkflowScriptRuntimeError",
+          kind: "provider",
+          message: "codex agent execution failed: temporary provider failure",
+          retryable: true,
+        },
+      },
+      { ok: true, value: "ok:success" },
+    ],
+  });
+
+  const calls = store.listAgentCalls(run.id);
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0]?.status, "failed");
+  assert.equal(calls[0]?.errorKind, "provider_unavailable");
+  assert.equal(calls[2]?.status, "failed");
+  assert.equal(calls[2]?.errorKind, "provider");
+
   store.close();
   await rm(dir, { recursive: true, force: true });
 }
