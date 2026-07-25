@@ -25,6 +25,7 @@ devspace workflow cancel <runId>
 devspace workflow ls
 devspace workflow calls <runId>
 devspace workflow call <runId> <callIndex>
+devspace workflow tui [runId]
 ```
 
 Named scripts: `.devspace/workflows/<name>.js` or `workflows/<name>.js`.
@@ -115,6 +116,7 @@ depending on a replayed mutating call.
 ## When to use CLI vs MCP
 
 - **CLI**: host agent can shell; prefer for long runs + `--follow`.
+- **TUI**: `devspace workflow tui` opens a read-only live view for workflows associated with the current working directory.
 - **MCP**: ChatGPT plans; call `run_workflow`, then `workflow_status` until terminal. Disconnecting MCP does **not** kill the worker.
 
 ## Worked mini-examples

@@ -69,6 +69,11 @@ export async function runWorkflowCommand(
     case "call":
       await runWorkflowCall(rest, config);
       return;
+    case "tui": {
+      const { runWorkflowTui } = await import("./workflow-tui.js");
+      await runWorkflowTui(rest, config);
+      return;
+    }
     case "__worker":
       await runWorkflowWorker(rest, config);
       return;
@@ -96,6 +101,7 @@ export function printWorkflowHelp(): void {
       "  devspace workflow ls",
       "  devspace workflow calls <runId>",
       "  devspace workflow call <runId> <callIndex>",
+      "  devspace workflow tui [runId]  # current working directory",
     ].join("\n"),
   );
 }
