@@ -20,6 +20,7 @@ import {
 } from "./workflow-types.js";
 import {
   isWorkflowOperationError,
+  WorkflowScriptRuntimeError,
   workflowErrorKind,
 } from "./workflow-errors.js";
 
@@ -186,6 +187,9 @@ async function executeNestedOnApi(input: {
 const WORKFLOW_MAX_NEST_DEPTH_LOCAL = 1;
 
 export function mapEngineErrorKind(error: unknown): WorkflowErrorKind {
+  if (error instanceof WorkflowScriptRuntimeError) {
+    return error.kind;
+  }
   if (error instanceof WorkflowEngineError) {
     return error.kind;
   }

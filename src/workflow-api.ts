@@ -17,6 +17,11 @@ import {
   type WorkflowMeta,
 } from "./workflow-types.js";
 import { agentOptsSchema } from "./workflow-contracts.js";
+import {
+  isWorkflowOperationError,
+  serializeWorkflowError,
+  WorkflowScriptRuntimeError,
+} from "./workflow-errors.js";
 
 // ---------------------------------------------------------------------------
 // Host deps (injected by engine; fakes OK in tests)
@@ -237,7 +242,7 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
   const semaphore = new WorkflowSemaphore(Math.max(1, deps.concurrency));
   let callIndex = 0;
 
-  const agent = async (prompt: unknown, opts: unknown = {}): Promise<unknown> => {
+  const runAgent = async (prompt: unknown, opts: unknown = {}): Promise<unknown> => {
     if (typeof prompt !== "string" || !prompt.trim()) {
       throw new WorkflowEngineError("internal", "agent(prompt) requires a non-empty string");
     }
@@ -493,11 +498,12 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
         }
       }
       if (agentCallBegun) {
+        const scriptError = toWorkflowScriptRuntimeError(error);
         deps.journal.failAgentCall({
           runId: deps.runId,
           callIndex: index,
           error: message,
-          errorKind: error instanceof WorkflowEngineError ? error.kind : "internal",
+          errorKind: scriptError.kind,
           worktreePath,
         });
       }
@@ -517,6 +523,14 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
       throw error;
     } finally {
       semaphore.release();
+    }
+  };
+
+  const agent = async (prompt: unknown, opts: unknown = {}): Promise<unknown> => {
+    try {
+      return await runAgent(prompt, opts);
+    } catch (error) {
+      throw toWorkflowScriptRuntimeError(error);
     }
   };
 
@@ -599,29 +613,36 @@ export function createWorkflowApi(deps: WorkflowApiDeps): WorkflowApi {
   };
 
   const workflow = async (...args: unknown[]): Promise<unknown> => {
-    if (nestDepth >= WORKFLOW_MAX_NEST_DEPTH) {
-      throw new WorkflowEngineError(
-        "nest_depth",
-        `workflow() nesting limited to ${WORKFLOW_MAX_NEST_DEPTH} level`,
-      );
+    try {
+      if (nestDepth >= WORKFLOW_MAX_NEST_DEPTH) {
+        throw new WorkflowEngineError(
+          "nest_depth",
+          `workflow() nesting limited to ${WORKFLOW_MAX_NEST_DEPTH} level`,
+        );
+      }
+      if (!deps.resolveNestedSource || !deps.executeNested) {
+        throw new WorkflowEngineError(
+          "internal",
+          "nested workflow() is not configured on this host",
+        );
+      }
+      const nameOrRef = args[0] as string | { scriptPath: string };
+      const childArgsResult = jsonValueSchema.optional().safeParse(args[1]);
+      if (!childArgsResult.success) {
+        throw new WorkflowEngineError(
+          "internal",
+          `workflow() args must be JSON-serializable: ${childArgsResult.error.issues[0]?.message ?? "invalid value"}`,
+        );
+      }
+      const source = await deps.resolveNestedSource(nameOrRef);
+      return await deps.executeNested({
+        source,
+        args: childArgsResult.data,
+        nestDepth: nestDepth + 1,
+      });
+    } catch (error) {
+      throw toWorkflowScriptRuntimeError(error);
     }
-    if (!deps.resolveNestedSource || !deps.executeNested) {
-      throw new WorkflowEngineError("internal", "nested workflow() is not configured on this host");
-    }
-    const nameOrRef = args[0] as string | { scriptPath: string };
-    const childArgsResult = jsonValueSchema.optional().safeParse(args[1]);
-    if (!childArgsResult.success) {
-      throw new WorkflowEngineError(
-        "internal",
-        `workflow() args must be JSON-serializable: ${childArgsResult.error.issues[0]?.message ?? "invalid value"}`,
-      );
-    }
-    const source = await deps.resolveNestedSource(nameOrRef);
-    return deps.executeNested({
-      source,
-      args: childArgsResult.data,
-      nestDepth: nestDepth + 1,
-    });
   };
 
   return {
@@ -643,6 +664,43 @@ function formatReplayMiss(miss: WorkflowReplayMiss): string {
   return miss.reason === "identity_changed" && miss.changedFields?.length
     ? `${miss.reason}:${miss.changedFields.join(",")}`
     : miss.reason;
+}
+
+export function toWorkflowScriptRuntimeError(
+  error: unknown,
+): WorkflowScriptRuntimeError {
+  if (error instanceof WorkflowScriptRuntimeError) return error;
+  if (error instanceof WorkflowEngineError) {
+    return new WorkflowScriptRuntimeError({
+      kind: error.kind,
+      message: error.message,
+      retryable:
+        error.kind === "provider_unavailable" ||
+        error.kind === "provider_disabled" ||
+        error.kind === "no_provider",
+    });
+  }
+  if (isWorkflowOperationError(error)) {
+    const serialized = serializeWorkflowError(error);
+    return new WorkflowScriptRuntimeError({
+      kind: serialized.kind,
+      message: serialized.message,
+      retryable: serialized.retryable,
+    });
+  }
+  if (error && typeof error === "object" && "name" in error) {
+    const name = String((error as { name: unknown }).name);
+    if (name === "AbortError") {
+      return new WorkflowScriptRuntimeError({
+        kind: "cancelled",
+        message: "Workflow cancelled",
+      });
+    }
+  }
+  return new WorkflowScriptRuntimeError({
+    kind: "internal",
+    message: error instanceof Error ? error.message : String(error),
+  });
 }
 
 /** Test helper: read current ALS phase (undefined outside phase). */

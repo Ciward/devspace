@@ -6,13 +6,13 @@ import { WorkflowStore } from "./workflow-store.js";
 import { executeWorkflow } from "./workflow-engine.js";
 import {
   createWorkflowApi,
-  WorkflowEngineError,
   WorkflowSemaphore,
   getCurrentWorkflowPhase,
   type WorkflowProviderRunInput,
   type CreateAgentWorktree,
 } from "./workflow-api.js";
 import { createStubBudget } from "./workflow-types.js";
+import { WorkflowScriptRuntimeError } from "./workflow-errors.js";
 
 // ---------------------------------------------------------------------------
 // Semaphore
@@ -455,7 +455,7 @@ return await workflow({ scriptPath: 'x' })
 `,
       }),
     (error: unknown) =>
-      error instanceof WorkflowEngineError && error.kind === "nest_depth",
+      error instanceof WorkflowScriptRuntimeError && error.kind === "nest_depth",
   );
 
   store.close();
@@ -492,7 +492,7 @@ return await workflow({ scriptPath: 'x' })
   });
   // abort before agent
   ac.abort();
-  await assert.rejects(async () => api.agent("x"), WorkflowEngineError);
+  await assert.rejects(async () => api.agent("x"), WorkflowScriptRuntimeError);
   store.close();
   await rm(dir, { recursive: true, force: true });
 }
