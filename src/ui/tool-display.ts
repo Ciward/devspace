@@ -138,6 +138,7 @@ export function getToolHeaderSummary(card: ToolResultCard): ToolHeaderSummary {
   if (card.tool === "open_workspace") {
     const parts = [
       typeof summary.mode === "string" ? summary.mode : undefined,
+      countLabel(summaryNumber(summary, "activeWorkflows"), "workflow"),
       countLabel(summaryNumber(summary, "agentsFiles"), "instruction"),
       countLabel(summaryNumber(summary, "skills"), "skill"),
     ].filter((part): part is string => Boolean(part));

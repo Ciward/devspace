@@ -504,7 +504,7 @@ async function waitForProjectSnapshot(
   const deadline = Date.now() + Math.min(waitMs, WORKFLOW_UI_WAIT_MAX_MS);
   for (;;) {
     const project = loadWorkflowUiProject(store, workspaceRoot);
-    if (!knownVersion || project.version !== knownVersion || Date.now() >= deadline) {
+    if (knownVersion === undefined || project.version !== knownVersion || Date.now() >= deadline) {
       return project;
     }
     await sleep(250);
@@ -520,7 +520,7 @@ async function waitForRunSnapshot(
   const deadline = Date.now() + Math.min(waitMs, WORKFLOW_UI_WAIT_MAX_MS);
   for (;;) {
     const run = loadWorkflowUiRun(store, runId);
-    if (!run || !knownVersion || run.version !== knownVersion || Date.now() >= deadline) {
+    if (!run || knownVersion === undefined || run.version !== knownVersion || Date.now() >= deadline) {
       return run;
     }
     await sleep(250);

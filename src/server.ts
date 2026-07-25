@@ -725,10 +725,10 @@ function createMcpServer(
 
   registerAppResource(
     server,
-    "DevSpace Diff Card",
+    "DevSpace App",
     WORKSPACE_APP_URI,
     {
-      description: "Interactive card for viewing DevSpace file diffs.",
+      description: "Interactive DevSpace workspace, workflow, and file-change views.",
       _meta: {
         ui: {
           csp: appCsp(config),

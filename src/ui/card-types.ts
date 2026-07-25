@@ -26,6 +26,16 @@ export interface ToolResultCard {
   workspaceId?: string;
   path?: string;
   root?: string;
+  mode?: "checkout" | "worktree";
+  sourceRoot?: string;
+  worktree?: {
+    path?: string;
+    baseRef?: string;
+    baseSha?: string;
+    dirtySource?: boolean;
+    detached?: boolean;
+    managed?: boolean;
+  };
   status?: string;
   name?: string;
   runId?: string;
@@ -174,6 +184,9 @@ export function isExpandableCard(card: ToolResultCard): boolean {
       Boolean(card.agentsFiles?.length) ||
       Boolean(card.availableAgentsFiles?.length) ||
       Boolean(card.skills?.length) ||
+      Boolean(card.activeWorkflows?.length) ||
+      Boolean(card.agentProviders?.length) ||
+      Boolean(card.agents?.length) ||
       Boolean(card.skillDiagnostics?.length)
     );
   }
