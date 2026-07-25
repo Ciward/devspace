@@ -41,7 +41,7 @@ Workflow scripts (JS only):
   agent(prompt, { label?, phase?, schema?, model?, effort?, provider?, isolation?: 'worktree' })
   parallel(thunks) → Array<T|null>   // barrier; throw → null
   pipeline(items, ...stages)        // no cross-item barrier
-  phase(title); log(msg); args; budget (stub)
+  phase(title); log(msg); args
   workflow(name | { scriptPath }, args?)  // nest depth 1
 Bans: Date.now(), Math.random(), new Date() without args.
 No writeMode — teach RO vs write in prompts; isolation contains writes.
@@ -69,6 +69,10 @@ export function registerWorkflowTools(
           .optional()
           .describe("Inline workflow script source (export const meta = …)."),
         name: z.string().optional().describe("Named workflow under .devspace/workflows/<name>.js"),
+        scriptPath: z
+          .string()
+          .optional()
+          .describe("Existing workflow script path. May be combined with resumeFromRunId."),
         resumeFromRunId: z.string().optional().describe("Prior run id to resume (new run + cache)."),
         args: jsonValueSchema.optional().describe("JSON args passed to script as `args`."),
         yieldTimeMs: z
@@ -82,15 +86,16 @@ export function registerWorkflowTools(
       annotations: { readOnlyHint: false },
       _meta: {},
     },
-    async ({ workspaceId, script, name, resumeFromRunId, args, yieldTimeMs }) => {
+    async ({ workspaceId, script, name, scriptPath, resumeFromRunId, args, yieldTimeMs }) => {
       const workspace = workspaces.getWorkspace(workspaceId);
       const store = createWorkflowStore(config);
       try {
-        const provided = [script, name, resumeFromRunId].filter((v) => v !== undefined);
-        if (provided.length !== 1) {
+        const providedSources = [script, name, scriptPath].filter((v) => v !== undefined);
+        if (providedSources.length > 1 || (providedSources.length === 0 && !resumeFromRunId)) {
           throw new InvalidWorkflowInputError({
-            code: provided.length === 0 ? "missing_source" : "ambiguous_source",
-            message: "Provide exactly one of script, name, or resumeFromRunId",
+            code: providedSources.length === 0 ? "missing_source" : "ambiguous_source",
+            message:
+              "Provide one of script, name, or scriptPath; resumeFromRunId may accompany that source or reuse the prior script",
           });
         }
 
@@ -105,13 +110,30 @@ export function registerWorkflowTools(
           const prior = store.getRun(resumeFromRunId);
           if (!prior) throw new WorkflowNotFoundError(resumeFromRunId);
           priorRunId = prior.id;
-          priorScriptPath = prior.scriptPath;
-          const resolvedResult = await readWorkflowScriptFileResult(prior.scriptPath);
-          if (resolvedResult.isErr()) throw resolvedResult.error;
-          const resolved = resolvedResult.value;
-          source = resolved.source;
-          scriptHash = prior.scriptHash;
-          nameHint = prior.name;
+          const overridePath = scriptPath;
+          if (script !== undefined) {
+            source = script;
+            const overrideParsed = parseWorkflowScript(source);
+            scriptHash = overrideParsed.scriptHash;
+            nameHint = overrideParsed.meta.name;
+          } else if (name) {
+            const resolvedResult = await resolveNamedWorkflowScriptResult({
+              name,
+              workspaceRoot: workspace.root,
+              stateDir: config.stateDir,
+            });
+            if (resolvedResult.isErr()) throw resolvedResult.error;
+            source = resolvedResult.value.source;
+            scriptHash = resolvedResult.value.scriptHash;
+            nameHint = resolvedResult.value.nameHint;
+          } else {
+            priorScriptPath = overridePath ?? prior.scriptPath;
+            const resolvedResult = await readWorkflowScriptFileResult(priorScriptPath);
+            if (resolvedResult.isErr()) throw resolvedResult.error;
+            source = resolvedResult.value.source;
+            scriptHash = resolvedResult.value.scriptHash;
+            nameHint = prior.name;
+          }
           runSource = "resume";
           if (args === undefined && prior.argsJson && prior.argsJson !== "null") {
             try {
@@ -132,6 +154,12 @@ export function registerWorkflowTools(
           scriptHash = resolved.scriptHash;
           nameHint = resolved.nameHint;
           runSource = "named";
+        } else if (scriptPath) {
+          const resolvedResult = await readWorkflowScriptFileResult(scriptPath);
+          if (resolvedResult.isErr()) throw resolvedResult.error;
+          source = resolvedResult.value.source;
+          scriptHash = resolvedResult.value.scriptHash;
+          nameHint = resolvedResult.value.nameHint;
         } else {
           source = script!;
           const parsed = parseWorkflowScript(source);
@@ -145,7 +173,7 @@ export function registerWorkflowTools(
         const run = store.createRun({
           name: parsed.meta.name || nameHint,
           source: runSource,
-          scriptPath: priorScriptPath ?? "pending",
+          scriptPath: "pending",
           scriptHash,
           workspaceRoot: workspace.root,
           workspaceId,
@@ -154,19 +182,16 @@ export function registerWorkflowTools(
           baseSha,
         });
 
-        let persisted = priorScriptPath;
-        if (!persisted) {
-          const persistedResult = await persistWorkflowScriptResult({
-            stateDir: config.stateDir,
-            runId: run.id,
-            source,
-            preferredName: parsed.meta.name || nameHint,
-          });
-          if (persistedResult.isErr()) throw persistedResult.error;
-          persisted = persistedResult.value;
-          const updated = store.setScriptPathResult(run.id, persisted);
-          if (updated.isErr()) throw updated.error;
-        }
+        const persistedResult = await persistWorkflowScriptResult({
+          stateDir: config.stateDir,
+          runId: run.id,
+          source,
+          preferredName: parsed.meta.name || nameHint,
+        });
+        if (persistedResult.isErr()) throw persistedResult.error;
+        const persisted = persistedResult.value;
+        const updated = store.setScriptPathResult(run.id, persisted);
+        if (updated.isErr()) throw updated.error;
 
         const cliEntry = fileURLToPath(
           import.meta.url.replace(/workflow-tools\.(ts|js)$/, "cli.$1"),
@@ -271,6 +296,7 @@ async function yieldEvents(
   events: WorkflowEventRecord[];
   nextSeq: number;
   terminal: boolean;
+  callSummary: ReturnType<typeof summarizeCalls>;
 }> {
   const deadline = Date.now() + Math.min(yieldMs, WORKFLOW_MCP_YIELD_MS);
   let cursor = sinceSeq;
@@ -288,7 +314,13 @@ async function yieldEvents(
     await sleep(250);
   }
 
-  return { run, events, nextSeq: cursor, terminal };
+  return {
+    run,
+    events,
+    nextSeq: cursor,
+    terminal,
+    callSummary: summarizeCalls(store.listAgentCalls(runId)),
+  };
 }
 
 function toolResult(page: {
@@ -296,10 +328,17 @@ function toolResult(page: {
   events: WorkflowEventRecord[];
   nextSeq: number;
   terminal: boolean;
+  callSummary: ReturnType<typeof summarizeCalls>;
 }) {
   const payload = {
     runId: page.run.id,
     status: page.run.status,
+    name: page.run.name,
+    source: page.run.source,
+    scriptPath: page.run.scriptPath,
+    scriptHash: page.run.scriptHash,
+    resumedFromRunId: page.run.resumedFromRunId,
+    callSummary: page.callSummary,
     events: page.events.map((e) => ({
       seq: e.seq,
       type: e.type,
@@ -315,6 +354,16 @@ function toolResult(page: {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
     structuredContent: payload,
+  };
+}
+
+function summarizeCalls(calls: ReturnType<ReturnType<typeof createWorkflowStore>["listAgentCalls"]>) {
+  return {
+    reused: calls.filter((call) => call.fromCache).length,
+    live: calls.filter((call) => !call.fromCache && call.status === "completed").length,
+    failed: calls.filter((call) => call.status === "failed").length,
+    running: calls.filter((call) => call.status === "running").length,
+    total: calls.length,
   };
 }
 

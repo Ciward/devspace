@@ -29,6 +29,7 @@ import {
   WORKFLOW_LIMITS,
   resolveWorkflowConcurrency,
   type WorkflowEventRecord,
+  type WorkflowAgentCallRecord,
   type WorkflowRunRecord,
   type WorkflowRunSource,
 } from "./workflow-types.js";
@@ -62,6 +63,12 @@ export async function runWorkflowCommand(
     case "list":
       await runWorkflowList(config);
       return;
+    case "calls":
+      await runWorkflowCalls(rest, config);
+      return;
+    case "call":
+      await runWorkflowCall(rest, config);
+      return;
     case "__worker":
       await runWorkflowWorker(rest, config);
       return;
@@ -82,11 +89,13 @@ export function printWorkflowHelp(): void {
       "DevSpace workflows",
       "",
       "Usage:",
-      "  devspace workflow run (--file <path> | --name <name> | --resume <runId>)",
+      "  devspace workflow run [--file|--script-path <path> | --name <name>] [--resume <runId>]",
       "                        [--arg key=value]... [--follow]",
       "  devspace workflow status <runId> [--follow]",
       "  devspace workflow cancel <runId>",
       "  devspace workflow ls",
+      "  devspace workflow calls <runId>",
+      "  devspace workflow call <runId> <callIndex>",
     ].join("\n"),
   );
 }
@@ -94,18 +103,24 @@ export function printWorkflowHelp(): void {
 async function runWorkflowRun(args: string[], config: ServerConfig): Promise<void> {
   const { flags } = splitFlags(args);
   const follow = flags.has("follow");
-  const file = flagValue(flags, "file");
+  const file = flagValue(flags, "script-path") ?? flagValue(flags, "file");
   const name = flagValue(flags, "name");
   const resumeFrom = flagValue(flags, "resume");
   const parsedArgs = parseWorkflowArgFlagsResult(collectArgTokens(args));
   if (parsedArgs.isErr()) throw parsedArgs.error;
   const workflowArgs = parsedArgs.value.args;
 
+  if (file && name) {
+    throw new InvalidWorkflowInputError({
+      code: "ambiguous_source",
+      message: "Provide only one of --file/--script-path or --name",
+    });
+  }
   if (!file && !name && !resumeFrom) {
     throw new InvalidWorkflowInputError({
       code: "missing_source",
       message:
-        "Usage: devspace workflow run (--file <path> | --name <name> | --resume <runId>)",
+        "Usage: devspace workflow run [--file|--script-path <path> | --name <name>] [--resume <runId>]",
     });
   }
 
@@ -125,13 +140,20 @@ async function runWorkflowRun(args: string[], config: ServerConfig): Promise<voi
       const prior = priorResult.value;
       if (!prior) throw new WorkflowNotFoundError(resumeFrom);
       priorRunId = prior.id;
-      priorScriptPath = prior.scriptPath;
-      const resolvedResult = await readWorkflowScriptFileResult(prior.scriptPath);
-      if (resolvedResult.isErr()) throw resolvedResult.error;
-      const resolved = resolvedResult.value;
+      const overrideResult = file || name
+        ? await resolveWorkflowScriptFromPathOrNameResult({
+            file,
+            name,
+            workspaceRoot,
+            stateDir: config.stateDir,
+          })
+        : await readWorkflowScriptFileResult(prior.scriptPath);
+      if (overrideResult.isErr()) throw overrideResult.error;
+      const resolved = overrideResult.value;
       source = resolved.source;
-      scriptHash = prior.scriptHash;
-      nameHint = prior.name;
+      scriptHash = resolved.scriptHash;
+      nameHint = "nameHint" in resolved ? resolved.nameHint : prior.name;
+      priorScriptPath = file ?? prior.scriptPath;
       runSource = "resume";
       if (!Object.keys(workflowArgs).length && prior.argsJson && prior.argsJson !== "null") {
         try {
@@ -157,14 +179,14 @@ async function runWorkflowRun(args: string[], config: ServerConfig): Promise<voi
     }
 
     const parsed = parseWorkflowScript(source, {
-      filename: priorScriptPath ?? file ?? name ?? "workflow:inline",
+      filename: file ?? priorScriptPath ?? name ?? "workflow:inline",
     });
     const baseSha = await resolveWorkspaceHead(workspaceRoot);
 
     const run = store.createRun({
       name: parsed.meta.name || nameHint,
       source: runSource,
-      scriptPath: priorScriptPath ?? "pending",
+      scriptPath: "pending",
       scriptHash,
       workspaceRoot,
       workspaceId: process.env.DEVSPACE_WORKSPACE_ID,
@@ -173,19 +195,16 @@ async function runWorkflowRun(args: string[], config: ServerConfig): Promise<voi
       baseSha,
     });
 
-    let persisted = priorScriptPath;
-    if (!persisted) {
-      const result = await persistWorkflowScriptResult({
-        stateDir: config.stateDir,
-        runId: run.id,
-        source,
-        preferredName: parsed.meta.name || nameHint,
-      });
-      if (result.isErr()) throw result.error;
-      persisted = result.value;
-      const updated = store.setScriptPathResult(run.id, persisted);
-      if (updated.isErr()) throw updated.error;
-    }
+    const result = await persistWorkflowScriptResult({
+      stateDir: config.stateDir,
+      runId: run.id,
+      source,
+      preferredName: parsed.meta.name || nameHint,
+    });
+    if (result.isErr()) throw result.error;
+    const persisted = result.value;
+    const updated = store.setScriptPathResult(run.id, persisted);
+    if (updated.isErr()) throw updated.error;
 
     spawnWorkflowWorkerFromCli(
       run.id,
@@ -214,6 +233,7 @@ async function runWorkflowStatus(args: string[], config: ServerConfig): Promise<
     const run = runResult.value;
     if (!run) throw new WorkflowNotFoundError(runId);
     console.log(formatRunLine(run));
+    console.log(formatCallSummary(store.listAgentCalls(runId)));
     if (follow) {
       await followRun(store, runId);
       return;
@@ -274,6 +294,40 @@ async function runWorkflowList(config: ServerConfig): Promise<void> {
       return;
     }
     for (const run of runs) console.log(formatRunLine(run));
+  } finally {
+    store.close();
+  }
+}
+
+async function runWorkflowCalls(args: string[], config: ServerConfig): Promise<void> {
+  const runId = args[0];
+  if (!runId) throw new Error("Usage: devspace workflow calls <runId>");
+  const store = createWorkflowStore(config);
+  try {
+    if (!store.getRun(runId)) throw new WorkflowNotFoundError(runId);
+    const calls = store.listAgentCalls(runId);
+    if (calls.length === 0) {
+      console.log("No workflow agent calls.");
+      return;
+    }
+    for (const call of calls) console.log(formatCallLine(call));
+  } finally {
+    store.close();
+  }
+}
+
+async function runWorkflowCall(args: string[], config: ServerConfig): Promise<void> {
+  const runId = args[0];
+  const callIndex = Number(args[1]);
+  if (!runId || !Number.isInteger(callIndex) || callIndex < 0) {
+    throw new Error("Usage: devspace workflow call <runId> <callIndex>");
+  }
+  const store = createWorkflowStore(config);
+  try {
+    if (!store.getRun(runId)) throw new WorkflowNotFoundError(runId);
+    const call = store.getAgentCall(runId, callIndex);
+    if (!call) throw new Error(`Unknown workflow agent call: ${runId}#${callIndex}`);
+    console.log(JSON.stringify(formatCallDetail(call), null, 2));
   } finally {
     store.close();
   }
@@ -501,10 +555,62 @@ function printEvent(event: WorkflowEventRecord): void {
 }
 
 function formatRunLine(
-  run: Pick<WorkflowRunRecord, "id" | "status" | "name" | "error">,
+  run: Pick<
+    WorkflowRunRecord,
+    "id" | "status" | "name" | "error" | "scriptPath" | "scriptHash" | "resumedFromRunId"
+  >,
 ): string {
   const err = run.error ? ` error=${JSON.stringify(run.error)}` : "";
-  return `${run.id} ${run.status} ${run.name}${err}`;
+  const resumed = run.resumedFromRunId ? ` resumedFrom=${run.resumedFromRunId}` : "";
+  return `${run.id} ${run.status} ${run.name} scriptPath=${JSON.stringify(run.scriptPath)} scriptHash=${run.scriptHash}${resumed}${err}`;
+}
+
+function formatCallLine(call: WorkflowAgentCallRecord): string {
+  const label = call.label ? ` label=${JSON.stringify(call.label)}` : "";
+  const phase = call.phase ? ` phase=${JSON.stringify(call.phase)}` : "";
+  const model = call.model ? ` model=${call.model}` : "";
+  const duration = callDurationMs(call);
+  const replay = call.fromCache
+    ? ` replay=${call.replayMatch ?? "cached"}:${call.replayedFromRunId ?? "?"}#${call.replayedFromCallIndex ?? "?"}`
+    : call.replayReason
+      ? ` replayMiss=${call.replayReason}`
+      : "";
+  const worktree = call.worktreePath
+    ? ` worktree=${JSON.stringify(call.worktreePath)} dirty=${String(call.dirty)}`
+    : "";
+  return `#${call.callIndex} ${call.status} ${call.provider}${model}${label}${phase} durationMs=${duration}${replay}${worktree}`;
+}
+
+function formatCallSummary(calls: WorkflowAgentCallRecord[]): string {
+  const reused = calls.filter((call) => call.fromCache).length;
+  const failed = calls.filter((call) => call.status === "failed").length;
+  const live = calls.filter(
+    (call) => !call.fromCache && call.status === "completed",
+  ).length;
+  const running = calls.filter((call) => call.status === "running").length;
+  return `calls reused=${reused} live=${live} failed=${failed} running=${running} total=${calls.length}`;
+}
+
+function formatCallDetail(call: WorkflowAgentCallRecord): Record<string, unknown> {
+  return {
+    ...call,
+    durationMs: callDurationMs(call),
+    schema: call.schemaJson ? safeParseJson(call.schemaJson) : undefined,
+    structured: call.structuredJson ? safeParseJson(call.structuredJson) : undefined,
+  };
+}
+
+function callDurationMs(call: WorkflowAgentCallRecord): number | undefined {
+  if (!call.startedAt || !call.completedAt) return undefined;
+  return Math.max(0, Date.parse(call.completedAt) - Date.parse(call.startedAt));
+}
+
+function safeParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 }
 
 function resolveEnabledProviders(
