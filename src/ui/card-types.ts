@@ -1,7 +1,10 @@
 import type { App } from "@modelcontextprotocol/ext-apps";
+import type { WorkflowRunSummaryView } from "../workflow-ui.js";
 
 export type ToolName =
   | "open_workspace"
+  | "run_workflow"
+  | "workflow_status"
   | "show_changes"
   | "apply_patch"
   | "exec_command"
@@ -24,6 +27,8 @@ export interface ToolResultCard {
   path?: string;
   root?: string;
   status?: string;
+  name?: string;
+  runId?: string;
   summary?: Record<string, unknown>;
   files?: Array<{
     path?: string;
@@ -46,6 +51,28 @@ export interface ToolResultCard {
     description?: string;
     path?: string;
   }>;
+  activeWorkflows?: WorkflowRunSummaryView[];
+  callSummary?: {
+    reused?: number;
+    live?: number;
+    failed?: number;
+    running?: number;
+    total?: number;
+  };
+  agentProviders?: Array<{
+    name?: string;
+    available?: boolean;
+    reason?: string;
+  }>;
+  agents?: Array<{
+    name?: string;
+    description?: string;
+    provider?: string;
+    model?: string;
+    effort?: string;
+    providerAvailable?: boolean;
+    providerUnavailableReason?: string;
+  }>;
   skillDiagnostics?: unknown[];
   instruction?: string;
 }
@@ -66,6 +93,8 @@ export interface ToolPayload {
 export function isToolName(value: unknown): value is ToolName {
   return (
     value === "open_workspace" ||
+    value === "run_workflow" ||
+    value === "workflow_status" ||
     value === "show_changes" ||
     value === "apply_patch" ||
     value === "exec_command" ||
@@ -108,6 +137,10 @@ export function isReviewTool(tool: ToolName): boolean {
   return tool === "show_changes";
 }
 
+export function isWorkflowTool(tool: ToolName): boolean {
+  return tool === "run_workflow" || tool === "workflow_status";
+}
+
 export function isToolResultCard(value: unknown): value is Omit<ToolResultCard, "tool"> {
   return Boolean(value && typeof value === "object");
 }
@@ -144,6 +177,8 @@ export function isExpandableCard(card: ToolResultCard): boolean {
       Boolean(card.skillDiagnostics?.length)
     );
   }
+
+  if (isWorkflowTool(card.tool)) return Boolean(card.runId);
 
   if (isReviewTool(card.tool)) return Boolean(card.files?.length || card.payload?.patch);
   if (isPatchTool(card.tool)) return Boolean(card.payload?.patch);
