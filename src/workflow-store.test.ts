@@ -135,6 +135,32 @@ try {
   assert.equal(store.getRun(run2.id)?.status, "completed");
   assert.equal(store.getRun(run2.id)?.resultJson, JSON.stringify({ ok: 1 }));
 
+  const otherProjectRun = store.createRun({
+    name: "other-project",
+    source: "inline",
+    scriptPath: join(root, "other.js"),
+    scriptHash: "other",
+    workspaceRoot: join(root, "other-project"),
+  });
+  assert.deepEqual(
+    store
+      .listRunsForWorkspace(join(root, "project"))
+      .map((entry) => entry.id)
+      .sort(),
+    [run.id, run2.id].sort(),
+  );
+  assert.deepEqual(
+    store
+      .listRunsForWorkspace(join(root, "project"), { statuses: ["completed"] })
+      .map((entry) => entry.id),
+    [run2.id],
+  );
+  assert.equal(
+    store.listRunsForWorkspace(join(root, "other-project"))[0]?.id,
+    otherProjectRun.id,
+  );
+  assert.deepEqual(store.listEvents(run.id, 2).map((event) => event.seq), [2, 3]);
+
   // Reap: stale heartbeat + dead pid (force heartbeat via shared sqlite handle)
   const run3 = store.createRun({
     name: "stale",

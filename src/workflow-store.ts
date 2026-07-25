@@ -248,6 +248,40 @@ export class WorkflowStore {
     return rows.map(rowToRun);
   }
 
+  listRunsForWorkspace(
+    workspaceRoot: string,
+    options: {
+      statuses?: WorkflowRunStatus[];
+      limit?: number;
+    } = {},
+  ): WorkflowRunRecord[] {
+    const root = resolve(workspaceRoot);
+    const limit = Math.max(1, Math.min(options.limit ?? 50, 500));
+    const statuses = options.statuses?.filter((status, index, values) =>
+      values.indexOf(status) === index,
+    );
+
+    if (!statuses?.length) {
+      const rows = this.database.sqlite
+        .prepare(
+          "select * from workflow_runs where workspace_root = ? order by updated_at desc limit ?",
+        )
+        .all(root, limit) as WorkflowRunRow[];
+      return rows.map(rowToRun);
+    }
+
+    const placeholders = statuses.map(() => "?").join(", ");
+    const rows = this.database.sqlite
+      .prepare(
+        `select * from workflow_runs
+         where workspace_root = ? and status in (${placeholders})
+         order by updated_at desc
+         limit ?`,
+      )
+      .all(root, ...statuses, limit) as WorkflowRunRow[];
+    return rows.map(rowToRun);
+  }
+
   /**
    * Atomically claim a starting run for the worker.
    * Returns undefined if the run is missing or not claimable.
@@ -568,6 +602,21 @@ export class WorkflowStore {
       terminal: TERMINAL_STATUSES.has(run.status),
       run,
     };
+  }
+
+  listEvents(runId: string, limit = 100): WorkflowEventRecord[] {
+    const capped = Math.max(1, Math.min(limit, WORKFLOW_LIMITS.eventDrainMax));
+    const rows = this.database.sqlite
+      .prepare(
+        `select * from (
+           select * from workflow_events
+           where run_id = ?
+           order by seq desc
+           limit ?
+         ) order by seq asc`,
+      )
+      .all(runId, capped) as WorkflowEventRow[];
+    return rows.map(rowToEvent);
   }
 
   beginAgentCall(input: BeginAgentCallInput): WorkflowAgentCallRecord {
