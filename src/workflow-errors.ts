@@ -8,7 +8,28 @@ import {
 import type {
   WorkflowErrorKind,
   WorkflowRunStatus,
+  WorkflowScriptThrownError,
 } from "./workflow-types.js";
+
+/** Public runtime error crossing from the host into workflow JavaScript. */
+export class WorkflowScriptRuntimeError
+  extends Error
+  implements WorkflowScriptThrownError
+{
+  readonly kind: WorkflowErrorKind;
+  readonly retryable: boolean;
+
+  constructor(input: {
+    kind: WorkflowErrorKind;
+    message: string;
+    retryable?: boolean;
+  }) {
+    super(input.message);
+    this.name = "WorkflowScriptRuntimeError";
+    this.kind = input.kind;
+    this.retryable = input.retryable ?? false;
+  }
+}
 
 export class InvalidWorkflowInputError extends TaggedError(
   "InvalidWorkflowInputError",

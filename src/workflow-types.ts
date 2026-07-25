@@ -40,6 +40,7 @@ export type {
   WorkflowPipeline,
   WorkflowRunSource,
   WorkflowRunStatus,
+  WorkflowScriptThrownError,
   WorkflowTask,
 } from "./workflow-contracts.js";
 

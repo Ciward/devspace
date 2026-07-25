@@ -129,6 +129,12 @@ export const workflowErrorKindSchema = z.enum([
 ]);
 export type WorkflowErrorKind = z.infer<typeof workflowErrorKindSchema>;
 
+/** Stable provider-independent error shape exposed to workflow scripts. */
+export interface WorkflowScriptThrownError extends Error {
+  kind: WorkflowErrorKind;
+  retryable: boolean;
+}
+
 export const WORKFLOW_EVENT_TYPES = [
   "run_started",
   "run_completed",
