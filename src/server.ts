@@ -48,6 +48,8 @@ import { createWorkspaceStore } from "./workspace-store.js";
 import { formatAgentsPath, WorkspaceRegistry } from "./workspaces.js";
 import { summarizeLocalAgentProfile } from "./local-agent-profiles.js";
 import { registerWorkflowTools } from "./workflow-tools.js";
+import { createWorkflowStore } from "./workflow-store.js";
+import { loadActiveWorkflowSummaries } from "./workflow-ui.js";
 import {
   formatLocalAgentProviderAvailabilitySummary,
   getLocalAgentProviderAvailabilitySnapshot,
@@ -262,6 +264,24 @@ const workspaceLocalAgentProviderOutputSchema = z.object({
 
 const workspaceAvailableAgentsFileOutputSchema = z.object({
   path: z.string(),
+});
+
+const workflowCallCountsOutputSchema = z.object({
+  running: z.number(),
+  completed: z.number(),
+  cached: z.number(),
+  failed: z.number(),
+  cancelled: z.number(),
+  observed: z.number(),
+});
+
+const workflowRunSummaryOutputSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.enum(["starting", "running", "completed", "failed", "cancelled"]),
+  currentPhase: z.string().optional(),
+  calls: workflowCallCountsOutputSchema,
+  updatedAt: z.string(),
 });
 
 const reviewFileOutputSchema = z.object({
@@ -779,6 +799,7 @@ function createMcpServer(
         agentProviders: z.array(workspaceLocalAgentProviderOutputSchema),
         agents: z.array(workspaceLocalAgentOutputSchema),
         skillDiagnostics: z.array(z.unknown()),
+        activeWorkflows: z.array(workflowRunSummaryOutputSchema),
         instruction: z.string(),
       },
       ...toolWidgetDescriptorMeta(config, "workspace"),
@@ -817,6 +838,16 @@ function createMcpServer(
       const availableAgentsFileOutputs = availableAgentsFiles.map((file) => ({
         path: formatAgentsPath(file.path, workspace.root),
       }));
+      const activeWorkflows = config.subagents
+        ? (() => {
+            const workflowStore = createWorkflowStore(config);
+            try {
+              return loadActiveWorkflowSummaries(workflowStore, workspace.root);
+            } finally {
+              workflowStore.close();
+            }
+          })()
+        : [];
       const instruction = config.skillsEnabled
         ? "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding."
         : "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.";
@@ -870,6 +901,7 @@ function createMcpServer(
               agentsFiles: loadedAgentsFiles.length,
               availableAgentsFiles: availableAgentsFileOutputs.length,
               skills: visibleSkills.length,
+              activeWorkflows: activeWorkflows.length,
               agentProviders: visibleAgentProviders.length,
               agents: visibleAgents.length,
               skillDiagnostics: workspace.skillDiagnostics.length,
@@ -885,6 +917,7 @@ function createMcpServer(
           agentsFiles: loadedAgentsFiles,
           availableAgentsFiles: availableAgentsFileOutputs,
           skills: visibleSkills,
+          activeWorkflows,
           agentProviders: visibleAgentProviders,
           agents: visibleAgents,
           skillDiagnostics: workspace.skillDiagnostics,
