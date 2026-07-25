@@ -58,11 +58,38 @@ return { summary, findings }
 | `agent(prompt, opts?)` | Throws on failure. `opts`: `label`, `phase`, `schema`, `model`, `effort`, `provider`, `isolation: 'worktree'` |
 | `parallel(thunks)` | Barrier; throw → `null` slot |
 | `pipeline(items, ...stages)` | Per-item chains; no cross-item barrier |
+| `settle(() => operation)` | DevSpace extension: convert a thrown operation into `{ ok, value }` or `{ ok, error: { kind, message, retryable } }` |
 | `phase(title)` / `log(msg)` | Progress; journaled |
 | `args` | Run input (object preferred) |
 | `workflow(name\|{scriptPath}, args?)` | Nested, depth 1, shared call index |
 
 **No `writeMode`.** Teach read-only vs write in the prompt. Use `isolation: 'worktree'` when parallel mutators would conflict (git required).
+
+### Failure-aware orchestration
+
+Default behavior stays Claude-compatible: direct `agent()` failures throw, while
+`parallel()` and `pipeline()` map a failed branch/item to `null`. Use `settle()`
+only when the script must distinguish failure kinds or implement fallback:
+
+```js
+const primary = await settle(() =>
+  agent('Read-only security review', { provider: 'claude' }),
+)
+
+const review = primary.ok
+  ? primary
+  : primary.error.kind === 'provider_unavailable'
+    ? await settle(() =>
+        agent('Read-only security review', { provider: 'codex' }),
+      )
+    : primary
+
+return review
+```
+
+Inside `parallel()`, wrap each branch with `settle()` to preserve failures as
+data instead of `null`. Failed settled outcomes are journaled failures and are
+not replayed as successful cached agent results.
 
 ### Determinism bans
 
