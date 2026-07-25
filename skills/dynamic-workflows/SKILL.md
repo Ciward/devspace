@@ -64,6 +64,61 @@ return { summary, findings }
 
 **No `writeMode`.** Teach read-only vs write in the prompt. Use `isolation: 'worktree'` when parallel mutators would conflict (git required).
 
+### Failure-aware orchestration
+
+`agent()` and nested `workflow()` throw a stable, provider-independent error:
+
+```js
+{
+  name: 'WorkflowScriptRuntimeError',
+  kind: 'provider_unavailable',
+  message: 'Claude is unavailable',
+  retryable: true,
+}
+```
+
+Use normal JavaScript `try/catch` for fallback. Branch on `error.kind`, not on
+provider-specific message text:
+
+```js
+let review
+try {
+  review = await agent('Read-only security review', { provider: 'claude' })
+} catch (error) {
+  if (error.kind !== 'provider_unavailable') throw error
+  review = await agent('Read-only security review', { provider: 'codex' })
+}
+```
+
+Default `parallel()` and `pipeline()` behavior remains unchanged: a thrown
+branch/item becomes `null`. When failure details must survive fan-out, catch the
+error inside each branch:
+
+```js
+async function attempt(task) {
+  try {
+    return { ok: true, value: await task() }
+  } catch (error) {
+    return {
+      ok: false,
+      error: {
+        kind: error.kind,
+        message: error.message,
+        retryable: error.retryable,
+      },
+    }
+  }
+}
+
+const reviews = await parallel([
+  () => attempt(() => agent('Security review', { provider: 'claude' })),
+  () => attempt(() => agent('Correctness review', { provider: 'codex' })),
+])
+```
+
+Failed calls remain journaled failures and are retried on resume; catching an
+error does not turn that failed agent call into a replayable success.
+
 ### Determinism bans
 
 `Date.now()`, `Math.random()`, and `new Date()` without args throw. Pass timestamps via `args` if needed.
