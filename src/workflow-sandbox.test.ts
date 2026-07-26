@@ -84,4 +84,58 @@ return Math.random()
   );
 }
 
+{
+  const started = Date.now();
+  await assert.rejects(
+    () =>
+      runWorkflowSandbox({
+        parsed: parseWorkflowScript(`
+export const meta = { name: 'sync-loop', description: 'd' }
+while (true) {}
+`),
+        api: api({ name: "sync-loop", description: "d" }),
+        timeoutMs: 100,
+      }),
+    /exceeded host timeout/,
+  );
+  assert.ok(Date.now() - started < 5_000, "synchronous loop should be externally terminated");
+
+  const followup = parseWorkflowScript(`
+export const meta = { name: 'after-loop', description: 'd' }
+return 'still-alive'
+`);
+  assert.equal(
+    await runWorkflowSandbox({ parsed: followup, api: api(followup.meta) }),
+    "still-alive",
+  );
+}
+
+{
+  await assert.rejects(
+    () =>
+      runWorkflowSandbox({
+        parsed: parseWorkflowScript(`
+export const meta = { name: 'constructor-escape', description: 'd' }
+return Object.constructor('return process.version')()
+`),
+        api: api({ name: "constructor-escape", description: "d" }),
+      }),
+    /process is not defined/,
+  );
+}
+
+{
+  await assert.rejects(
+    () =>
+      runWorkflowSandbox({
+        parsed: parseWorkflowScript(`
+export const meta = { name: 'api-constructor-escape', description: 'd' }
+return agent.constructor('return process.version')()
+`),
+        api: api({ name: "api-constructor-escape", description: "d" }),
+      }),
+    /process is not defined/,
+  );
+}
+
 console.log("workflow-sandbox.test.ts: ok");
