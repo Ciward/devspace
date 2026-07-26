@@ -116,6 +116,7 @@ export async function executeWorkflow(
       parsed,
       api,
       timeoutMs: options.timeoutMs ?? WORKFLOW_HOST_TIMEOUT_MS,
+      signal,
     });
     return {
       result,
@@ -180,6 +181,7 @@ async function executeNestedOnApi(input: {
     parsed,
     api: childApi,
     timeoutMs: input.parentOptions.timeoutMs ?? WORKFLOW_HOST_TIMEOUT_MS,
+    signal: input.parentOptions.signal,
   });
 }
 
