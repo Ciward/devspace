@@ -57,7 +57,7 @@ DevSpace is a self-hosted MCP server that lets ChatGPT read, edit, search, and r
 
 ## Installation
 
-DevSpace requires Node `>=20.12 <27`. Node 22 LTS is recommended.
+DevSpace requires Node `>=22.19 <27`.
 
 Install the DevSpace CLI:
 
@@ -117,6 +117,14 @@ Most users should connect through a public HTTPS tunnel:
 https://your-tunnel-host.example.com/mcp
 ```
 
+> [!NOTE]
+> Using DevSpace as an MCP connector isn't against OpenAI's Usage Policies — it's
+> a standard custom App/connector setup, and writing or running code isn't a
+> restricted use case. But your account is governed by your usage, not by
+> DevSpace. Don't point it at anything that would violate your provider's terms.
+> Used normally, you're fine. (Based on OpenAI's Usage Policies and Service Terms
+> as of June 2026.)
+
 ## What ChatGPT Can Do
 
 Once connected, ChatGPT can open one of your approved project folders as a
@@ -172,6 +180,7 @@ devspace doctor
 - [Setup Guide](https://github.com/Waishnav/devspace/blob/main/docs/setup.md)
 - [ChatGPT Coding Workflow](https://github.com/Waishnav/devspace/blob/main/docs/chatgpt-coding-workflow.md)
 - [Configuration Reference](https://github.com/Waishnav/devspace/blob/main/docs/configuration.md)
+- [Native File Download](https://github.com/Waishnav/devspace/blob/main/docs/artifact-exchange.md)
 - [Security Model](https://github.com/Waishnav/devspace/blob/main/docs/security.md)
 - [Troubleshooting Gotchas](https://github.com/Waishnav/devspace/blob/main/docs/gotchas.md)
 

@@ -23,13 +23,17 @@ const config: ServerConfig = {
     "/Users/alice/personal/open-source",
   ],
   allowedHosts: ["localhost", "127.0.0.1", "::1", "devspace.example.com"],
-  minimalTools: true,
-  toolNaming: "short",
+  toolMode: "minimal",
   widgets: "full",
   stateDir: "/Users/alice/.local/share/devspace",
   worktreeRoot: "/Users/alice/.devspace/worktrees",
+  artifactsEnabled: false,
+  artifactMaxFileBytes: 100 * 1024 * 1024,
   skillsEnabled: true,
   skillPaths: [],
+  devspaceSkillsDir: "/Users/alice/.devspace/skills",
+  devspaceAgentsDir: "/Users/alice/.devspace/agents",
+  subagents: false,
   agentDir: "/Users/alice/.codex",
   logging: {
     level: "info",
@@ -79,7 +83,6 @@ assert.match(formatted, /open_workspace with \{"path":"\/Users\/alice\/work"\}/)
 assert.match(formatted, /open_workspace with \{"path":"\/Users\/alice\/work","mode":"worktree"\}/);
 
 assert.equal(toolNamesFor(config).workspaceInfo, "workspace_info");
-assert.equal(toolNamesFor({ ...config, toolNaming: "legacy" }).workspaceInfo, "workspace_info");
 assert.equal(toolNamesFor(config).listProjects, "list_projects");
 
 assert.match(openWorkspaceDescription(config, toolNamesFor(config)), /\/Users\/alice\/work/);
@@ -122,5 +125,5 @@ const proxiedServer = createServer({
 try {
   assert.equal(proxiedServer.app.get("trust proxy"), "loopback");
 } finally {
-  proxiedServer.close();
+  await proxiedServer.close();
 }
