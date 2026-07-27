@@ -26,6 +26,7 @@ const LOCAL_AGENT_EXECUTABLES = new Set([
 const LOCAL_AGENT_PACKAGES = new Set([
   "@anthropic-ai/claude-code",
   "@openai/codex",
+  "claude-code",
   "opencode-ai",
 ]);
 
@@ -75,7 +76,13 @@ function inspectCommandWords(input: string[]): string | undefined {
   }
 
   const packageName = packageRunnerTarget(executable, words.slice(1));
-  if (packageName && LOCAL_AGENT_PACKAGES.has(packageName)) return packageName;
+  if (
+    packageName &&
+    (LOCAL_AGENT_PACKAGES.has(packageName) ||
+      LOCAL_AGENT_EXECUTABLES.has(executableName(packageName) ?? ""))
+  ) {
+    return packageName;
+  }
 
   if (SHELL_EXECUTABLES.has(executable)) {
     const nested = shellCommandArgument(words.slice(1));
@@ -136,7 +143,22 @@ function packageRunnerTarget(executable: string, args: string[]): string | undef
     candidates = args.slice(1);
   }
 
-  return candidates.find((word) => !word.startsWith("-"))?.toLowerCase();
+  const target = candidates.find((word) => !word.startsWith("-"));
+  return target ? normalizePackageName(target) : undefined;
+}
+
+function normalizePackageName(value: string): string {
+  const packageName = value.toLowerCase();
+  if (packageName.startsWith("@")) {
+    const scopeSeparator = packageName.indexOf("/");
+    const versionSeparator = packageName.lastIndexOf("@");
+    return scopeSeparator >= 0 && versionSeparator > scopeSeparator
+      ? packageName.slice(0, versionSeparator)
+      : packageName;
+  }
+
+  const versionSeparator = packageName.indexOf("@");
+  return versionSeparator > 0 ? packageName.slice(0, versionSeparator) : packageName;
 }
 
 function shellCommandArgument(args: string[]): string | undefined {
