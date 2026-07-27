@@ -39,6 +39,7 @@ import {
 } from "./user-config.js";
 import { expandHomePath } from "./roots.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
+import { findWebOnlyCommandViolation } from "./web-only-policy.js";
 
 type Command = "serve" | "init" | "doctor" | "config" | "agents" | "help" | "version";
 const require = createRequire(import.meta.url);
@@ -321,6 +322,9 @@ function printHelp(): void {
 }
 
 async function runAgentsCommand(args: string[]): Promise<void> {
+  const violation = findWebOnlyCommandViolation(`devspace agents ${args.join(" ")}`);
+  if (violation) throw new Error(violation);
+
   const [subcommand, ...rest] = args;
   switch (subcommand) {
     case "ls":

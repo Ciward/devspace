@@ -110,11 +110,10 @@ export function ensureDevspaceDefaultSkills(env: NodeJS.ProcessEnv = process.env
 }
 
 export function resolveSubagentsFlag(
-  config: Pick<DevspaceUserConfig, "subagents">,
-  env: NodeJS.ProcessEnv = process.env,
+  _config: Pick<DevspaceUserConfig, "subagents">,
+  _env: NodeJS.ProcessEnv = process.env,
 ): boolean | undefined {
-  if (env.DEVSPACE_SUBAGENTS === undefined) return config.subagents;
-  return ["1", "true", "yes", "on"].includes(env.DEVSPACE_SUBAGENTS.toLowerCase());
+  return false;
 }
 
 function readJsonFile<T>(filePath: string): T {

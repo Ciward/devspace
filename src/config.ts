@@ -247,10 +247,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     skillPaths: parsePathList(env.DEVSPACE_SKILL_PATHS),
     devspaceSkillsDir: devspaceSkillsDir(env),
     devspaceAgentsDir: devspaceAgentsDir(env),
-    subagents:
-      env.DEVSPACE_SUBAGENTS === undefined
-        ? files.config.subagents === true
-        : parseBoolean(env.DEVSPACE_SUBAGENTS),
+    subagents: false,
     agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
     logging: parseLoggingConfig(env),
   };

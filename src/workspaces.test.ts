@@ -63,22 +63,7 @@ try {
     availableAgentsFiles.map((file) => file.path),
     [join(root, "nested", "AGENTS.md")],
   );
-  assert.deepEqual(
-    workspace.agentProfiles.map((profile) => ({
-      name: profile.name,
-      description: profile.description,
-      provider: profile.provider,
-      body: profile.body,
-    })),
-    [
-      {
-        name: "reviewer",
-        description: "Read-only project reviewer.",
-        provider: "codex",
-        body: "Review only.",
-      },
-    ],
-  );
+  assert.deepEqual(workspace.agentProfiles, []);
 
   if (platform() !== "win32") {
     const unsafeAgentDir = join(root, ".pi", "unsafe-agent");

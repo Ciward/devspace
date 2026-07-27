@@ -81,6 +81,9 @@ assert.match(formatted, /Public MCP endpoint: https:\/\/devspace\.example\.com\/
 assert.match(formatted, /Managed Git worktrees are created under: \/Users\/alice\/\.devspace\/worktrees/);
 assert.match(formatted, /open_workspace with \{"path":"\/Users\/alice\/work"\}/);
 assert.match(formatted, /open_workspace with \{"path":"\/Users\/alice\/work","mode":"worktree"\}/);
+assert.match(formatted, /STRICT WEB-ONLY EXECUTION POLICY/);
+assert.match(formatted, /Completed with ChatGPT Web \+ DevSpace/);
+assert.match(formatted, /Completed with Claude Web \+ DevSpace/);
 
 assert.equal(toolNamesFor(config).workspaceInfo, "workspace_info");
 assert.equal(toolNamesFor(config).listProjects, "list_projects");

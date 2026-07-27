@@ -20,6 +20,34 @@
 
 DevSpace is a self-hosted MCP server that lets ChatGPT read, edit, search, and run code in your real local projects — your files, your tools, your terminal — without uploading anything to a third party. You run it on your machine, expose it through a tunnel you control, and approve the connection with a password only you have.
 
+## DevSpace Cheap: Web-only execution
+
+The `devspace-cheap` branch is a strict web-model-only variant for ChatGPT Web
+and Claude Web. The connected web model performs the work itself through
+DevSpace tools and must not delegate to a local coding agent.
+
+This branch:
+
+- fixes Subagents to disabled even if config or `DEVSPACE_SUBAGENTS=1` attempts
+  to enable them
+- hides local agent profiles and the bundled `subagent-delegation` skill
+- disables every `devspace agents` CLI command
+- blocks common local agent launch commands through both `bash` and
+  `exec_command`, including Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent,
+  Copilot CLI, package-runner forms, and OMX agent orchestration
+- instructs the web model to end final responses with
+  `Completed with ChatGPT Web + DevSpace` or
+  `Completed with Claude Web + DevSpace`
+
+The command guard is defense in depth, not an operating-system sandbox. Shell
+access remains powerful and the MCP connection must still be treated as trusted.
+
+Install this branch directly from the public fork:
+
+```bash
+npm install -g github:Ciward/devspace#devspace-cheap
+```
+
 ## Sponsors and Special Thanks
 
 <table>

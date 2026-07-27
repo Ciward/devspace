@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
-import { LocalAgentStore } from "./local-agent-store.js";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   version: string;
@@ -25,47 +24,10 @@ try {
   const stateDir = join(root, ".state");
   const projectRoot = join(root, "project");
   mkdirSync(stateDir, { recursive: true });
-  mkdirSync(join(configDir, "agents"), { recursive: true });
+  mkdirSync(configDir, { recursive: true });
   mkdirSync(projectRoot, { recursive: true });
-  writeFileSync(
-    join(configDir, "agents", "reviewer.md"),
-    [
-      "---",
-      "name: reviewer",
-      "description: Read-only reviewer.",
-      "provider: codex",
-      "model: gpt-5.4",
-      "thinking: high",
-      "---",
-      "",
-      "Review only.",
-      "",
-    ].join("\n"),
-  );
-  const store = new LocalAgentStore(stateDir);
-  const current = store.update(
-    store.create({
-      workspaceId: "ws_current",
-      workspaceRoot: projectRoot,
-      profileName: "reviewer",
-      provider: "codex",
-      model: "gpt-5.4",
-      thinking: "high",
-    }).id,
-    { status: "idle" },
-  );
-  const other = store.update(
-    store.create({
-      workspaceId: "ws_other",
-      workspaceRoot: projectRoot,
-      profileName: "reviewer",
-      provider: "codex",
-    }).id,
-    { status: "running" },
-  );
-  store.close();
 
-  const output = execFileSync("node", ["--import", "tsx", "src/cli.ts", "agents", "ls"], {
+  const blockedAgents = spawnSync("node", ["--import", "tsx", "src/cli.ts", "agents", "ls"], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: {
@@ -80,9 +42,8 @@ try {
     },
   });
 
-  assert.match(output, new RegExp(`${current.id} idle reviewer codex gpt-5\\.4 thinking=high`));
-  assert.doesNotMatch(output, /profile reviewer/);
-  assert.doesNotMatch(output, new RegExp(other.id));
+  assert.notEqual(blockedAgents.status, 0);
+  assert.match(blockedAgents.stderr, /web-only policy blocks local agent execution/i);
 
   assert.equal(loadConfig({
     DEVSPACE_CONFIG_DIR: configDir,
@@ -90,7 +51,8 @@ try {
     DEVSPACE_STATE_DIR: stateDir,
     DEVSPACE_SUBAGENTS: "1",
     DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
-  }).subagents, true);
+  }).subagents, false);
+
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

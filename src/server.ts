@@ -60,6 +60,10 @@ import {
   getLocalAgentProviderAvailabilitySnapshot,
   type LocalAgentProviderAvailability,
 } from "./local-agent-availability.js";
+import {
+  findWebOnlyCommandViolation,
+  WEB_ONLY_POLICY_INSTRUCTIONS,
+} from "./web-only-policy.js";
 
 type Transport = StreamableHTTPServerTransport;
 // MCP clients can reconnect without closing the previous transport. Bound stale
@@ -243,6 +247,7 @@ export function formatAccessSummary(summary: AccessSummary): string {
     .join("\n");
 
   return [
+    WEB_ONLY_POLICY_INSTRUCTIONS,
     "Accessible local workspace roots:",
     roots || "- No allowed roots configured.",
     `Public MCP endpoint: ${summary.publicMcpUrl}`,
@@ -737,7 +742,7 @@ function registerCodexProcessTools(
     {
       title: "Execute command",
       description:
-        "Run a command inside an open workspace. Returns its result when it exits during the yield window, otherwise returns a sessionId for write_stdin. Use this for file inspection, tests, builds, package scripts, and long-running processes. Call open_workspace first and pass workspaceId.",
+        "Run a command inside an open workspace. Returns its result when it exits during the yield window, otherwise returns a sessionId for write_stdin. Use this for file inspection, tests, builds, package scripts, and long-running processes. Local agent and subagent commands are blocked by the web-only policy. Call open_workspace first and pass workspaceId.",
       inputSchema: {
         workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
         cmd: z.string().min(1).describe("Shell command to execute."),
@@ -772,6 +777,28 @@ function registerCodexProcessTools(
     },
     async ({ workspaceId, cmd, tty, columns, rows, workingDirectory, yieldTimeMs, maxOutputTokens }) => {
       const startedAt = performance.now();
+      const violation = findWebOnlyCommandViolation(cmd);
+      if (violation) {
+        const content = [textBlock(violation)];
+        logFailedToolResponse(config, {
+          tool: "exec_command",
+          workspaceId,
+          workingDirectory: workingDirectory ?? ".",
+          command: cmd,
+          commandLength: cmd.length,
+        }, content, startedAt);
+        return {
+          isError: true,
+          content,
+          structuredContent: {
+            result: violation,
+            running: false,
+            wallTimeMs: Math.round(performance.now() - startedAt),
+            outputTruncated: false,
+          },
+        };
+      }
+
       const workspace = workspaces.getWorkspace(workspaceId);
       const cwd = workspaces.resolveWorkingDirectory(workspace, workingDirectory);
       const snapshot = await processSessions.start({
@@ -883,7 +910,7 @@ function createMcpServer(
       title: "DevSpace",
       version: "0.1.0",
       description:
-        "Secure local coding workspace for MCP clients. Provides workspace-scoped file, search, edit, write, and shell tools.",
+        "Web-model-only local coding workspace for MCP clients. Provides workspace-scoped file, search, edit, write, and shell tools without local agent delegation.",
     },
     {
       instructions: serverInstructions(config),
@@ -1820,8 +1847,8 @@ function createMcpServer(
     {
       title: "Bash",
       description: config.toolMode !== "full"
-        ? `Run a shell command inside an open workspace. Use only for tests, builds, git inspection, package scripts, search, file discovery, and directory inspection. In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use command-line tools such as grep, rg, find, ls, and tree for those read-only inspection actions. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read} for direct file reads. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`
-        : `Run a shell command inside an open workspace. Use only for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`,
+        ? `Run a shell command inside an open workspace. Use only for tests, builds, git inspection, package scripts, search, file discovery, and directory inspection. In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use command-line tools such as grep, rg, find, ls, and tree for those read-only inspection actions. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read} for direct file reads. Local agent and subagent commands are blocked by the web-only policy. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`
+        : `Run a shell command inside an open workspace. Use only for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection. Local agent and subagent commands are blocked by the web-only policy. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`,
       inputSchema: {
         workspaceId: z
           .string()
@@ -1850,6 +1877,25 @@ function createMcpServer(
     },
     async ({ workspaceId, workingDirectory, ...input }) => {
       const startedAt = performance.now();
+      const violation = findWebOnlyCommandViolation(input.command);
+      if (violation) {
+        const content = [textBlock(violation)];
+        logFailedToolResponse(config, {
+          tool: toolNames.shell,
+          workspaceId,
+          workingDirectory: workingDirectory ?? ".",
+          command: input.command,
+          commandLength: input.command.length,
+        }, content, startedAt);
+        return {
+          isError: true,
+          content,
+          structuredContent: {
+            result: violation,
+          },
+        };
+      }
+
       const workspace = workspaces.getWorkspace(workspaceId);
       const cwd = workspaces.resolveWorkingDirectory(
         workspace,

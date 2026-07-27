@@ -206,7 +206,7 @@ try {
     loadWorkspaceSkills(experimentalConfig, projectRoot).skills.some(
       (skill) => skill.name === "subagent-delegation",
     ),
-    true,
+    false,
   );
 
   const duplicateConfig = loadConfig({

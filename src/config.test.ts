@@ -37,12 +37,12 @@ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_SKILLS: "0" }).skillsEnabled, fal
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_SKILLS: "1" }).skillsEnabled, true);
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_SUBAGENTS: "1" }).subagents,
-  true,
+  false,
 );
-assert.equal(resolveSubagentsFlag({}, {}), undefined);
-assert.equal(resolveSubagentsFlag({ subagents: true }, {}), true);
+assert.equal(resolveSubagentsFlag({}, {}), false);
+assert.equal(resolveSubagentsFlag({ subagents: true }, {}), false);
 assert.equal(resolveSubagentsFlag({ subagents: true }, { DEVSPACE_SUBAGENTS: "0" }), false);
-assert.equal(resolveSubagentsFlag({}, { DEVSPACE_SUBAGENTS: "1" }), true);
+assert.equal(resolveSubagentsFlag({}, { DEVSPACE_SUBAGENTS: "1" }), false);
 
 const seededConfigDir = mkdtempSync(join(tmpdir(), "devspace-seeded-skills-test-"));
 const seededSkillPaths = ensureDevspaceDefaultSkills({ DEVSPACE_CONFIG_DIR: seededConfigDir });
@@ -189,7 +189,7 @@ const fileConfig = loadConfig({ DEVSPACE_CONFIG_DIR: configDir });
 assert.equal(fileConfig.port, 8787);
 assert.equal(fileConfig.oauth.ownerToken, "persisted-owner-token-long-enough");
 assert.equal(fileConfig.publicBaseUrl, "https://devspace.example.com");
-assert.equal(fileConfig.subagents, true);
+assert.equal(fileConfig.subagents, false);
 assert.equal(fileConfig.artifactsEnabled, true);
 assert.equal(fileConfig.artifactMaxFileBytes, 321);
 assert.deepEqual(fileConfig.allowedHosts, [
