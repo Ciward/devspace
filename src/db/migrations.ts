@@ -22,6 +22,11 @@ const migrations: Migration[] = [
     name: "local-agent-sessions",
     up: migrateLocalAgentSessions,
   },
+  {
+    version: 4,
+    name: "worktree-archive-state",
+    up: migrateWorktreeArchiveState,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -175,6 +180,12 @@ function migrateLocalAgentSessions(sqlite: Database.Database): void {
   `);
 
   addColumnIfMissing(sqlite, "local_agent_sessions", "thinking", "text");
+}
+
+function migrateWorktreeArchiveState(sqlite: Database.Database): void {
+  addColumnIfMissing(sqlite, "workspace_sessions", "archive_remote", "text");
+  addColumnIfMissing(sqlite, "workspace_sessions", "archive_ref", "text");
+  addColumnIfMissing(sqlite, "workspace_sessions", "archived_at", "text");
 }
 
 function addColumnIfMissing(
