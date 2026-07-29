@@ -98,6 +98,9 @@ function migrateWorkspaceState(sqlite: Database.Database): void {
   addColumnIfMissing(sqlite, "workspace_sessions", "base_ref", "text");
   addColumnIfMissing(sqlite, "workspace_sessions", "base_sha", "text");
   addColumnIfMissing(sqlite, "workspace_sessions", "managed", "text not null default 'false'");
+  addColumnIfMissing(sqlite, "workspace_sessions", "archive_remote", "text");
+  addColumnIfMissing(sqlite, "workspace_sessions", "archive_ref", "text");
+  addColumnIfMissing(sqlite, "workspace_sessions", "archived_at", "text");
 }
 
 function migrateOAuthState(sqlite: Database.Database): void {

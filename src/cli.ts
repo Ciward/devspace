@@ -158,6 +158,7 @@ async function runInit({ force }: { force: boolean }): Promise<void> {
     }));
 
     const config: DevspaceUserConfig = {
+      ...files.config,
       host: files.config.host ?? "127.0.0.1",
       port,
       allowedRoots,
@@ -265,6 +266,8 @@ async function runDoctor(): Promise<void> {
     console.log(`Public MCP URL: ${new URL("/mcp", config.publicBaseUrl).toString()}`);
     console.log(`Allowed roots: ${config.allowedRoots.join(", ")}`);
     console.log(`Allowed hosts: ${config.allowedHosts.join(", ")}`);
+    console.log(`Managed worktree limit: ${config.worktreeMaxCount || "disabled"}`);
+    console.log(`Worktree archive remote: ${config.worktreeArchiveRemote}`);
   } catch (error) {
     console.log(`Config status: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -282,18 +285,31 @@ function runConfigCommand(args: string[]): void {
   if (subcommand !== "set") {
     throw new Error(`Unknown config command: ${subcommand}`);
   }
-  if (key !== "publicBaseUrl") {
-    throw new Error("Only `devspace config set publicBaseUrl <url|null>` is supported right now.");
-  }
-
   const value = rest.join(" ").trim();
   if (!value) {
-    throw new Error("Missing publicBaseUrl value.");
+    throw new Error(`Missing ${key ?? "config"} value.`);
+  }
+
+  let update: Partial<DevspaceUserConfig>;
+  switch (key) {
+    case "publicBaseUrl":
+      update = { publicBaseUrl: normalizeOptionalPublicBaseUrl(value) };
+      break;
+    case "worktreeMaxCount":
+      update = { worktreeMaxCount: parseWorktreeMaxCount(value) };
+      break;
+    case "worktreeArchiveRemote":
+      update = { worktreeArchiveRemote: value };
+      break;
+    default:
+      throw new Error(
+        "Supported config keys: publicBaseUrl, worktreeMaxCount, worktreeArchiveRemote.",
+      );
   }
 
   writeDevspaceConfig({
     ...files.config,
-    publicBaseUrl: normalizeOptionalPublicBaseUrl(value),
+    ...update,
   });
   console.log(`Updated ${files.configPath}`);
 }
@@ -310,6 +326,8 @@ function printHelp(): void {
       "  devspace doctor          Show config, runtime, and native dependency status",
       "  devspace config get      Print persisted config",
       "  devspace config set publicBaseUrl <url|null>",
+      "  devspace config set worktreeMaxCount <count>",
+      "  devspace config set worktreeArchiveRemote <remote>",
       "  devspace agents ls       List subagent sessions",
       "  devspace agents run <profile-or-provider-or-id> [--model <model>] <prompt>",
       "  devspace agents show <id>",
@@ -592,6 +610,14 @@ function normalizeOptionalPublicBaseUrl(value: string): string | null {
   if (!trimmed || trimmed === "null" || trimmed === "none") return null;
 
   return normalizePublicBaseUrl(trimmed);
+}
+
+function parseWorktreeMaxCount(value: string): number {
+  const count = Number(value);
+  if (!Number.isInteger(count) || count < 0 || count > 10_000) {
+    throw new Error("worktreeMaxCount must be an integer between 0 and 10000.");
+  }
+  return count;
 }
 
 function normalizePublicBaseUrl(value: string): string {

@@ -6,6 +6,12 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { loadProjectContextFiles } from "@earendil-works/pi-coding-agent";
 import type { ServerConfig } from "./config.js";
 import { createManagedWorktree } from "./git-worktrees.js";
+import {
+  archiveManagedWorktree,
+  type ArchivedWorktree,
+  ManagedWorktreeRotator,
+  type WorktreeRotationResult,
+} from "./worktree-rotation.js";
 import { assertAllowedPath, isPathInsideRoot, resolveAllowedPath } from "./roots.js";
 import {
   loadWorkspaceSkills,
@@ -75,11 +81,49 @@ type DirectoryOps = {
 
 export class WorkspaceRegistry {
   private readonly workspaces = new Map<string, Workspace>();
+  private readonly worktreeRotator: ManagedWorktreeRotator;
 
   constructor(
     private readonly config: ServerConfig,
     private readonly store?: WorkspaceStore,
-  ) {}
+  ) {
+    this.worktreeRotator = new ManagedWorktreeRotator(
+      config.worktreeRoot,
+      config.worktreeMaxCount,
+      config.worktreeArchiveRemote,
+      store,
+    );
+  }
+
+  async enforceWorktreeLimit(reservedSlots = 0): Promise<WorktreeRotationResult> {
+    const result = await this.worktreeRotator.enforce(reservedSlots);
+    for (const archived of result.archived) this.forgetWorkspaceRoot(archived.path);
+    for (const missingRoot of result.missingRoots) this.forgetWorkspaceRoot(missingRoot);
+    return result;
+  }
+
+  async completeWorkspace(workspaceId: string): Promise<ArchivedWorktree> {
+    const workspace = this.getWorkspace(workspaceId);
+    if (workspace.mode !== "worktree" || !workspace.worktree?.managed) {
+      throw new Error("Only a DevSpace-managed worktree can be completed and archived.");
+    }
+
+    const archived = await archiveManagedWorktree(
+      workspace.root,
+      this.config.worktreeArchiveRemote,
+      {
+        requireMergedIntoSourceHead: true,
+        sourceRoot: workspace.sourceRoot,
+      },
+    );
+    this.store?.markWorktreeArchived?.(
+      archived.path,
+      archived.archiveRemote,
+      archived.archiveRef,
+    );
+    this.forgetWorkspaceRoot(archived.path);
+    return archived;
+  }
 
   async openWorkspace(input: string | OpenWorkspaceInput): Promise<WorkspaceContext> {
     const options = typeof input === "string" ? { path: input } : input;
@@ -100,7 +144,7 @@ export class WorkspaceRegistry {
     }
 
     const session = this.store?.getSession(workspaceId);
-    if (!session) {
+    if (!session || session.status !== "active") {
       throw new Error(`Unknown workspaceId: ${workspaceId}. Call open_workspace first.`);
     }
 
@@ -184,6 +228,7 @@ export class WorkspaceRegistry {
   }
 
   private async openWorktreeWorkspace(path: string, baseRef: string | undefined): Promise<WorkspaceContext> {
+    await this.enforceWorktreeLimit(1);
     const worktree = await createManagedWorktree({
       sourcePath: path,
       baseRef,
@@ -196,6 +241,12 @@ export class WorkspaceRegistry {
       sourceRoot: worktree.sourceRoot,
       worktree,
     });
+  }
+
+  private forgetWorkspaceRoot(root: string): void {
+    for (const [id, workspace] of this.workspaces) {
+      if (workspace.root === root) this.workspaces.delete(id);
+    }
   }
 
   private async createWorkspaceContext(input: {

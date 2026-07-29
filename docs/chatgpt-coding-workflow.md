@@ -56,6 +56,19 @@ Managed worktrees are created under:
 Worktree mode requires a Git repository with at least one commit. It starts from
 `HEAD` unless `baseRef` is provided.
 
+DevSpace keeps at most 10 managed worktrees by default. Change the limit with
+`devspace config set worktreeMaxCount <count>` or
+`DEVSPACE_WORKTREE_MAX_COUNT`; `0` disables rotation. When rotation is needed,
+DevSpace selects the least recently used clean worktree, pushes its exact HEAD
+to a unique `devspace-archive/...` branch on the configured remote, verifies the
+remote SHA, and only then removes the local worktree. Dirty worktrees are never
+automatically committed or deleted.
+
+After a managed-worktree task has been verified and merged back into the source
+repository's current main branch, the MCP host should call `complete_workspace`.
+That tool verifies the merge and clean state before performing the same remote
+archive and local cleanup.
+
 Uncommitted source checkout changes are not copied into the managed worktree.
 DevSpace reports when the source checkout was dirty so the model can decide how
 to proceed with the user.

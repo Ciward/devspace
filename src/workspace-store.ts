@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { openDatabase, type DatabaseHandle } from "./db/client.js";
 import {
   workspaceSessions,
@@ -32,6 +32,9 @@ export interface WorkspaceStore {
   }): WorkspaceSession;
   getSession(id: string): WorkspaceSession | undefined;
   touchSession(id: string): void;
+  listManagedWorktreeSessions?(): WorkspaceSession[];
+  markWorktreeArchived?(root: string, archiveRemote: string, archiveRef: string): void;
+  markWorktreeMissing?(root: string): void;
   close?(): void;
 }
 
@@ -99,6 +102,40 @@ export class SqliteWorkspaceStore implements WorkspaceStore {
       .update(workspaceSessions)
       .set({ lastUsedAt: new Date().toISOString() })
       .where(eq(workspaceSessions.id, id))
+      .run();
+  }
+
+  listManagedWorktreeSessions(): WorkspaceSession[] {
+    return this.database.db
+      .select()
+      .from(workspaceSessions)
+      .where(and(
+        eq(workspaceSessions.mode, "worktree"),
+        eq(workspaceSessions.managed, "true"),
+        eq(workspaceSessions.status, "active"),
+      ))
+      .all()
+      .map(rowToWorkspaceSession);
+  }
+
+  markWorktreeArchived(root: string, archiveRemote: string, archiveRef: string): void {
+    this.database.db
+      .update(workspaceSessions)
+      .set({
+        status: "archived",
+        archiveRemote,
+        archiveRef,
+        archivedAt: new Date().toISOString(),
+      })
+      .where(and(eq(workspaceSessions.root, root), eq(workspaceSessions.status, "active")))
+      .run();
+  }
+
+  markWorktreeMissing(root: string): void {
+    this.database.db
+      .update(workspaceSessions)
+      .set({ status: "missing" })
+      .where(and(eq(workspaceSessions.root, root), eq(workspaceSessions.status, "active")))
       .run();
   }
 

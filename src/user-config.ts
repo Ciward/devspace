@@ -17,6 +17,8 @@ export interface DevspaceUserConfig {
   allowedHosts?: string[];
   stateDir?: string;
   worktreeRoot?: string;
+  worktreeMaxCount?: number;
+  worktreeArchiveRemote?: string;
   artifactsEnabled?: boolean;
   artifactMaxFileBytes?: number;
   agentDir?: string;

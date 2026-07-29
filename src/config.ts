@@ -10,6 +10,7 @@ export type WidgetMode = "off" | "changes" | "full";
 const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const DEFAULT_ARTIFACT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_WORKTREE_MAX_COUNT = 10;
 
 export interface ServerConfig {
   host: string;
@@ -22,6 +23,8 @@ export interface ServerConfig {
   widgets: WidgetMode;
   stateDir: string;
   worktreeRoot: string;
+  worktreeMaxCount: number;
+  worktreeArchiveRemote: string;
   artifactsEnabled: boolean;
   artifactMaxFileBytes: number;
   skillsEnabled: boolean;
@@ -143,6 +146,22 @@ function parsePositiveInteger(
   return parsed;
 }
 
+function parseNonNegativeInteger(
+  value: string | undefined,
+  fallback: number,
+  name: string,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
+  if (value === undefined || value === "") return fallback;
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > max) {
+    throw new Error(`Invalid ${name}: ${value}`);
+  }
+
+  return parsed;
+}
+
 function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
   return {
     level: parseLogLevel(env.DEVSPACE_LOG_LEVEL),
@@ -234,6 +253,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     widgets: parseWidgetMode(env.DEVSPACE_WIDGETS),
     stateDir: resolve(expandHomePath(env.DEVSPACE_STATE_DIR ?? files.config.stateDir ?? defaultStateDir())),
     worktreeRoot: resolve(expandHomePath(env.DEVSPACE_WORKTREE_ROOT ?? files.config.worktreeRoot ?? defaultWorktreeRoot())),
+    worktreeMaxCount: parseNonNegativeInteger(
+      env.DEVSPACE_WORKTREE_MAX_COUNT ?? numberConfigValue(files.config.worktreeMaxCount),
+      DEFAULT_WORKTREE_MAX_COUNT,
+      "DEVSPACE_WORKTREE_MAX_COUNT",
+      10_000,
+    ),
+    worktreeArchiveRemote:
+      env.DEVSPACE_WORKTREE_ARCHIVE_REMOTE?.trim()
+      || files.config.worktreeArchiveRemote?.trim()
+      || "origin",
     artifactsEnabled:
       env.DEVSPACE_ARTIFACTS === undefined
         ? files.config.artifactsEnabled === true

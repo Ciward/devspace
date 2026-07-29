@@ -27,6 +27,21 @@ try {
   mkdirSync(configDir, { recursive: true });
   mkdirSync(projectRoot, { recursive: true });
 
+  const configSet = spawnSync(
+    "node",
+    ["--import", "tsx", "src/cli.ts", "config", "set", "worktreeMaxCount", "6"],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: { ...process.env, DEVSPACE_CONFIG_DIR: configDir },
+    },
+  );
+  assert.equal(configSet.status, 0, configSet.stderr);
+  assert.equal(
+    JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).worktreeMaxCount,
+    6,
+  );
+
   const blockedAgents = spawnSync("node", ["--import", "tsx", "src/cli.ts", "agents", "ls"], {
     cwd: process.cwd(),
     encoding: "utf8",

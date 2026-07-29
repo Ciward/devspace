@@ -13,6 +13,9 @@ export const workspaceSessions = sqliteTable(
     managed: text("managed").notNull().default("false"),
     createdAt: text("created_at").notNull(),
     lastUsedAt: text("last_used_at").notNull(),
+    archiveRemote: text("archive_remote"),
+    archiveRef: text("archive_ref"),
+    archivedAt: text("archived_at"),
   },
   (table) => [
     index("workspace_sessions_root_idx").on(table.root, table.lastUsedAt),

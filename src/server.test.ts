@@ -27,6 +27,8 @@ const config: ServerConfig = {
   widgets: "full",
   stateDir: "/Users/alice/.local/share/devspace",
   worktreeRoot: "/Users/alice/.devspace/worktrees",
+  worktreeMaxCount: 10,
+  worktreeArchiveRemote: "origin",
   artifactsEnabled: false,
   artifactMaxFileBytes: 100 * 1024 * 1024,
   skillsEnabled: true,
@@ -79,6 +81,8 @@ assert.match(formatted, /Accessible local workspace roots:/);
 assert.match(formatted, /- \/Users\/alice\/work/);
 assert.match(formatted, /Public MCP endpoint: https:\/\/devspace\.example\.com\/mcp/);
 assert.match(formatted, /Managed Git worktrees are created under: \/Users\/alice\/\.devspace\/worktrees/);
+assert.match(formatted, /Managed worktree limit: 10/);
+assert.match(formatted, /Worktree archive remote: origin/);
 assert.match(formatted, /open_workspace with \{"path":"\/Users\/alice\/work"\}/);
 assert.match(formatted, /open_workspace with \{"path":"\/Users\/alice\/work","mode":"worktree"\}/);
 assert.match(formatted, /STRICT WEB-ONLY EXECUTION POLICY/);
@@ -87,6 +91,7 @@ assert.match(formatted, /Completed with Claude Web \+ DevSpace/);
 
 assert.equal(toolNamesFor(config).workspaceInfo, "workspace_info");
 assert.equal(toolNamesFor(config).listProjects, "list_projects");
+assert.equal(toolNamesFor(config).completeWorkspace, "complete_workspace");
 
 assert.match(openWorkspaceDescription(config, toolNamesFor(config)), /\/Users\/alice\/work/);
 assert.match(openWorkspaceDescription(config, toolNamesFor(config)), /list_projects/);

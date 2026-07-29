@@ -103,6 +103,8 @@ export interface AccessSummary {
   localMcpUrl: string;
   allowedRoots: string[];
   worktreeRoot: string;
+  worktreeMaxCount: number;
+  worktreeArchiveRemote: string;
   openWorkspaceExamples: Array<{
     path: string;
     mode: "checkout" | "worktree";
@@ -180,6 +182,7 @@ function toolWidgetDescriptorMeta(
 
 const toolNames = {
   openWorkspace: "open_workspace",
+  completeWorkspace: "complete_workspace",
   workspaceInfo: "workspace_info",
   listProjects: "list_projects",
   read: "read",
@@ -231,6 +234,8 @@ export function accessSummary(config: ServerConfig): AccessSummary {
     localMcpUrl: `http://${config.host}:${config.port}/mcp`,
     allowedRoots: config.allowedRoots,
     worktreeRoot: config.worktreeRoot,
+    worktreeMaxCount: config.worktreeMaxCount,
+    worktreeArchiveRemote: config.worktreeArchiveRemote,
     openWorkspaceExamples: [...checkoutExamples, ...worktreeExample],
   };
 }
@@ -253,6 +258,8 @@ export function formatAccessSummary(summary: AccessSummary): string {
     `Public MCP endpoint: ${summary.publicMcpUrl}`,
     `Local MCP endpoint: ${summary.localMcpUrl}`,
     `Managed Git worktrees are created under: ${summary.worktreeRoot}`,
+    `Managed worktree limit: ${summary.worktreeMaxCount || "disabled"}`,
+    `Worktree archive remote: ${summary.worktreeArchiveRemote}`,
     "Typical starting calls:",
     examples || "- No workspace examples available.",
     "Only paths under the accessible roots can be opened as workspaces. Shell commands run with the local user's permissions, so keep work scoped to the active workspace unless the user explicitly asks otherwise.",
@@ -354,10 +361,11 @@ function serverInstructions(config: ServerConfig): string {
     config.widgets === "changes"
       ? " If the turn successfully modifies files by creating, editing, overwriting, deleting, moving, or applying patches, call show_changes exactly once for that workspace after the final related file change and before your final response so the user can inspect the aggregate diff for that turn. Do not call it after every individual file change; do not skip it because individual file-change tools already returned diffs."
       : "";
+  const completionInstruction = ` When working in a managed Git worktree, finish the requested implementation, verification, commit, push, and merge back into the source repository's current main branch. After the worktree HEAD is merged and the worktree is clean, call ${toolNames.completeWorkspace} exactly once to archive its HEAD to the configured remote, verify the remote archive, and remove the local worktree. Do not call it before the merge is complete.`;
 
   if (config.toolMode === "codex") {
     const access = formatAccessSummary(accessSummary(config));
-    return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}`;
+    return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
   }
 
   const inspection = config.toolMode !== "full"
@@ -372,7 +380,7 @@ function serverInstructions(config: ServerConfig): string {
 
   const access = formatAccessSummary(accessSummary(config));
 
-  return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}`;
+  return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
 }
 
 function formatVisibleAgent(agent: {
@@ -442,6 +450,8 @@ const accessSummaryOutputSchema = z.object({
   localMcpUrl: z.string(),
   allowedRoots: z.array(z.string()),
   worktreeRoot: z.string(),
+  worktreeMaxCount: z.number(),
+  worktreeArchiveRemote: z.string(),
   openWorkspaceExamples: z.array(z.object({
     path: z.string(),
     mode: z.enum(["checkout", "worktree"]),
@@ -1155,9 +1165,12 @@ function createMcpServer(
       }));
       const access = accessSummary(config);
       const accessText = formatAccessSummary(access);
-      const instruction = config.skillsEnabled
+      const baseInstruction = config.skillsEnabled
         ? "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding."
         : "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.";
+      const instruction = workspace.mode === "worktree"
+        ? `${baseInstruction} After the task is fully verified and this worktree has been committed, pushed, and merged into the source repository's current main branch, call ${toolNames.completeWorkspace} exactly once with this workspaceId. It will verify the merge, archive the worktree HEAD remotely, and remove the local worktree.`
+        : baseInstruction;
       const resultContent: ToolContent[] = [
         {
           type: "text" as const,
@@ -1232,6 +1245,66 @@ function createMcpServer(
           instruction,
         },
       };
+    },
+  );
+
+  registerAppTool(
+    server,
+    toolNames.completeWorkspace,
+    {
+      title: "Complete workspace",
+      description:
+        "Finalize a DevSpace-managed worktree after its task is complete and merged into the source repository's current main branch. Verifies that the worktree is clean and its HEAD is contained by the source HEAD, archives the exact HEAD to the configured Git remote, verifies the remote SHA, then removes the local worktree. Call this exactly once at the end of a completed worktree workflow; never call it for unfinished or unmerged work.",
+      inputSchema: {
+        workspaceId: z.string().describe("Managed worktree workspace identifier returned by open_workspace."),
+      },
+      outputSchema: resultOutputSchema({
+        archiveRemote: z.string(),
+        archiveRef: z.string(),
+        head: z.string(),
+        removedPath: z.string(),
+      }),
+      ...toolWidgetDescriptorMeta(config, "workspace"),
+      annotations: WRITE_TOOL_ANNOTATIONS,
+    },
+    async ({ workspaceId }) => {
+      const startedAt = performance.now();
+      try {
+        const archived = await workspaces.completeWorkspace(workspaceId);
+        const content = [textBlock(
+          `Completed and removed managed worktree ${archived.path}. Archived ${archived.head} to ${archived.archiveRemote}/${archived.archiveRef}.`,
+        )];
+        logToolCall(config, {
+          tool: toolNames.completeWorkspace,
+          workspaceId,
+          path: archived.path,
+          success: true,
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+        return {
+          content,
+          structuredContent: {
+            result: contentText(content),
+            archiveRemote: archived.archiveRemote,
+            archiveRef: archived.archiveRef,
+            head: archived.head,
+            removedPath: archived.path,
+          },
+        };
+      } catch (error) {
+        const content = [textBlock(
+          `Workspace completion refused: ${error instanceof Error ? error.message : String(error)}`,
+        )];
+        logFailedToolResponse(config, {
+          tool: toolNames.completeWorkspace,
+          workspaceId,
+        }, content, startedAt);
+        return {
+          isError: true,
+          content,
+          structuredContent: { result: contentText(content) },
+        };
+      }
     },
   );
 
@@ -1999,6 +2072,24 @@ export function createServer(
   const localAgentProviders = config.subagents
     ? getLocalAgentProviderAvailabilitySnapshot()
     : [];
+
+  void workspaces.enforceWorktreeLimit().then((result) => {
+    for (const archived of result.archived) {
+      logEvent(config.logging, "info", "worktree_archived", {
+        path: archived.path,
+        remote: archived.archiveRemote,
+        ref: archived.archiveRef,
+        head: archived.head,
+      });
+    }
+    for (const root of result.missingRoots) {
+      logEvent(config.logging, "warn", "worktree_missing", { path: root });
+    }
+  }).catch((error) => {
+    logEvent(config.logging, "error", "worktree_rotation_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 
   const logSessionCloseResults = (
     reason: "idle_timeout" | "server_shutdown",

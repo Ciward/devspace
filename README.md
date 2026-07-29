@@ -38,6 +38,10 @@ This branch:
 - instructs the web model to end final responses with
   `Completed with ChatGPT Web + DevSpace` or
   `Completed with Claude Web + DevSpace`
+- keeps a configurable number of managed worktrees, archiving each retired HEAD
+  to a verified remote `devspace-archive/...` branch before local removal
+- exposes `complete_workspace` and prompts the web model to call it after a
+  managed-worktree task is merged back into the source branch
 
 The command guard is defense in depth, not an operating-system sandbox. Shell
 access remains powerful and the MCP connection must still be treated as trusted.

@@ -37,6 +37,8 @@ npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
 | `DEVSPACE_ALLOWED_HOSTS` | Optional Host header allowlist override. |
 | `DEVSPACE_OAUTH_OWNER_TOKEN` | Owner password for OAuth approval. Must be at least 16 characters. |
 | `DEVSPACE_WORKTREE_ROOT` | Directory for managed Git worktrees. Defaults to `~/.devspace/worktrees`. |
+| `DEVSPACE_WORKTREE_MAX_COUNT` | Maximum managed worktrees. Defaults to `10`; use `0` to disable rotation. Before removal, clean HEADs are archived and verified on the configured remote. |
+| `DEVSPACE_WORKTREE_ARCHIVE_REMOTE` | Git remote used for worktree archive branches. Defaults to `origin`. |
 | `DEVSPACE_STATE_DIR` | Directory for SQLite state. Defaults to `~/.local/share/devspace`. |
 
 ## Native Artifact Download

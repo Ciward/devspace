@@ -28,6 +28,14 @@ assert.equal(loadConfig(baseEnv).devspaceAgentsDir, join(emptyConfigDir, "agents
 assert.equal(loadConfig(baseEnv).subagents, false);
 assert.equal(loadConfig(baseEnv).artifactsEnabled, false);
 assert.equal(loadConfig(baseEnv).artifactMaxFileBytes, 100 * 1024 * 1024);
+assert.equal(loadConfig(baseEnv).worktreeMaxCount, 10);
+assert.equal(loadConfig(baseEnv).worktreeArchiveRemote, "origin");
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WORKTREE_MAX_COUNT: "3" }).worktreeMaxCount, 3);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WORKTREE_MAX_COUNT: "0" }).worktreeMaxCount, 0);
+assert.equal(
+  loadConfig({ ...baseEnv, DEVSPACE_WORKTREE_ARCHIVE_REMOTE: "backup" }).worktreeArchiveRemote,
+  "backup",
+);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_ARTIFACTS: "1" }).artifactsEnabled, true);
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_ARTIFACT_MAX_FILE_BYTES: "123" }).artifactMaxFileBytes,
@@ -149,6 +157,10 @@ assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_ARTIFACT_MAX_FILE_BYTES: "0" }),
   /Invalid DEVSPACE_ARTIFACT_MAX_FILE_BYTES: 0/,
 );
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_WORKTREE_MAX_COUNT: "-1" }),
+  /Invalid DEVSPACE_WORKTREE_MAX_COUNT: -1/,
+);
 
 assert.equal(loadConfig(baseEnv).publicBaseUrl, "http://127.0.0.1:7676");
 assert.deepEqual(loadConfig(baseEnv).allowedHosts, ["localhost", "127.0.0.1", "::1"]);
@@ -176,6 +188,8 @@ writeFileSync(
     subagents: true,
     artifactsEnabled: true,
     artifactMaxFileBytes: 321,
+    worktreeMaxCount: 7,
+    worktreeArchiveRemote: "archive",
   }),
 );
 writeFileSync(
@@ -192,6 +206,8 @@ assert.equal(fileConfig.publicBaseUrl, "https://devspace.example.com");
 assert.equal(fileConfig.subagents, false);
 assert.equal(fileConfig.artifactsEnabled, true);
 assert.equal(fileConfig.artifactMaxFileBytes, 321);
+assert.equal(fileConfig.worktreeMaxCount, 7);
+assert.equal(fileConfig.worktreeArchiveRemote, "archive");
 assert.deepEqual(fileConfig.allowedHosts, [
   "localhost",
   "127.0.0.1",
