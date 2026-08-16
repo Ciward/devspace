@@ -42,6 +42,9 @@ This branch:
   to a verified remote `devspace-archive/...` branch before local removal
 - exposes `complete_workspace` and prompts the web model to call it after a
   managed-worktree task is merged back into the source branch
+- explicitly permits the web model to run Git lifecycle writes such as
+  `git add`, `git commit`, `git push`, fetch, pull, merge, rebase, cherry-pick,
+  branch, and tag inside the active workspace
 
 The command guard is defense in depth, not an operating-system sandbox. Shell
 access remains powerful and the MCP connection must still be treated as trusted.

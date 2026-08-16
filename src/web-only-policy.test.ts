@@ -7,6 +7,8 @@ assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /web-hosted ChatGPT or Claude/
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /must not consume local agent tokens or quotas/i);
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /ChatGPT Web \+ DevSpace/);
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /Claude Web \+ DevSpace/);
+assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /git add, commit, push/i);
+assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /never claim.*Git.*inspection-only/i);
 
 for (const command of [
   'codex exec "fix the tests"',
@@ -32,6 +34,11 @@ for (const command of [
 for (const command of [
   "npm test",
   "git status --short",
+  "git add src/server.ts",
+  'git commit -m "Allow Git lifecycle writes"',
+  "git push origin devspace-cheap",
+  "git fetch origin",
+  "git merge --ff-only origin/devspace-cheap",
   'rg -n "codex|claude" src',
   "npx tsc --noEmit",
   "node scripts/check-agent-profile.mjs",

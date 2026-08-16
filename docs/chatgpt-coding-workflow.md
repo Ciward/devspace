@@ -183,6 +183,8 @@ The shell tool is for commands that belong in a terminal:
 - tests
 - builds
 - git inspection
+- Git lifecycle writes, including `git add`, `git commit`, `git push`, fetch,
+  pull, merge, rebase, cherry-pick, branch, and tag
 - package scripts
 - environment checks
 
