@@ -27,6 +27,11 @@ const migrations: Migration[] = [
     name: "worktree-archive-state",
     up: migrateWorktreeArchiveState,
   },
+  {
+    version: 5,
+    name: "workspace-conversation-and-worktree-archive-state",
+    up: migrateWorkspaceConversationAndWorktreeArchiveState,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -186,6 +191,30 @@ function migrateWorktreeArchiveState(sqlite: Database.Database): void {
   addColumnIfMissing(sqlite, "workspace_sessions", "archive_remote", "text");
   addColumnIfMissing(sqlite, "workspace_sessions", "archive_ref", "text");
   addColumnIfMissing(sqlite, "workspace_sessions", "archived_at", "text");
+}
+
+function migrateWorkspaceConversationBindings(sqlite: Database.Database): void {
+  sqlite.exec(`
+    create table if not exists workspace_conversation_bindings (
+      conversation_scope_id text not null,
+      target_key text not null,
+      workspace_session_id text not null,
+      created_at text not null,
+      last_used_at text not null,
+      primary key (conversation_scope_id, target_key),
+      foreign key (workspace_session_id)
+        references workspace_sessions(id)
+        on delete cascade
+    );
+
+    create index if not exists workspace_conversation_bindings_workspace_idx
+      on workspace_conversation_bindings(workspace_session_id);
+  `);
+}
+
+function migrateWorkspaceConversationAndWorktreeArchiveState(sqlite: Database.Database): void {
+  migrateWorkspaceConversationBindings(sqlite);
+  migrateWorktreeArchiveState(sqlite);
 }
 
 function addColumnIfMissing(

@@ -50,6 +50,7 @@ import {
 } from "./mcp-sessions.js";
 import { ProcessSessionManager, type ProcessSnapshot } from "./process-sessions.js";
 import { createReviewCheckpointManager } from "./review-checkpoints.js";
+import { openAiConversationScopeId } from "./request-meta.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
 import { formatPathForPrompt } from "./skills.js";
 import { createWorkspaceStore } from "./workspace-store.js";
@@ -196,6 +197,9 @@ const toolNames = {
 
 type ToolNames = typeof toolNames;
 
+const workspaceIdDescription =
+  "Workspace to use. Reuse the current project's workspaceId.";
+
 interface ToolLogFields {
   tool: string;
   workspaceId?: string;
@@ -272,12 +276,12 @@ function formatAllowedRoots(config: ServerConfig): string {
 
 export function openWorkspaceDescription(config: ServerConfig, toolNames: ToolNames): string {
   return [
-    "Open a local project directory as a coding workspace.",
+    "Start or recover work in a local project directory or isolated worktree when no usable workspaceId exists for it.",
     `Allowed roots are: ${formatAllowedRoots(config)}.`,
     `If the user asks what local projects, folders, repositories, or workspaces are available, call ${toolNames.listProjects} first instead of guessing paths.`,
     "Do not open ~ or arbitrary home-directory guesses; open one allowed root or a project directory under an allowed root.",
-    "Call this once per project folder or worktree before reading, editing, searching, writing, showing changes, or running commands.",
-    "Reuse the returned workspaceId for later calls in the same folder; do not call open_workspace again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen.",
+    "Reuse the returned workspaceId throughout continued work in the same project or worktree.",
+    "Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, the current workspaceId is rejected, or the user explicitly asks to reopen.",
     "By default this opens the actual checkout; set mode=\"worktree\" when the user asks for an isolated or parallel coding session.",
     "Returns a workspaceId, loaded root project instructions, nested instruction file paths, and the DevSpace access summary.",
   ].join(" ");
@@ -362,10 +366,10 @@ function serverInstructions(config: ServerConfig): string {
       ? " If the turn successfully modifies files by creating, editing, overwriting, deleting, moving, or applying patches, call show_changes exactly once for that workspace after the final related file change and before your final response so the user can inspect the aggregate diff for that turn. Do not call it after every individual file change; do not skip it because individual file-change tools already returned diffs."
       : "";
   const completionInstruction = ` When working in a managed Git worktree, finish the requested implementation, verification, commit, push, and merge back into the source repository's current main branch. After the worktree HEAD is merged and the worktree is clean, call ${toolNames.completeWorkspace} exactly once to archive its HEAD to the configured remote, verify the remote archive, and remove the local worktree. Do not call it before the merge is complete.`;
+  const access = formatAccessSummary(accessSummary(config));
 
   if (config.toolMode === "codex") {
-    const access = formatAccessSummary(accessSummary(config));
-    return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Use ${toolNames.read} for direct file reads, apply_patch for ordinary project-file modifications, exec_command for inspection, tests, builds, package scripts, and Git lifecycle commands including add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag, and write_stdin to poll or interact with running processes. Git writes required to complete the requested repository workflow are explicitly allowed; do not claim Git is inspection-only. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
+    return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} when no usable workspaceId exists for a project folder or isolated worktree, then keep using that workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. Use ${toolNames.read} for direct file reads, apply_patch for ordinary project-file modifications, exec_command for inspection, tests, builds, package scripts, and Git lifecycle commands including add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag, and write_stdin to poll or interact with running processes. Git writes required to complete the requested repository workflow are explicitly allowed; do not claim Git is inspection-only. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
   }
 
   const inspection = config.toolMode !== "full"
@@ -378,9 +382,7 @@ function serverInstructions(config: ServerConfig): string {
 
   const agentsMd = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
 
-  const access = formatAccessSummary(accessSummary(config));
-
-  return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted ordinary project-file modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, package scripts, and Git lifecycle commands including add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. Git writes required to complete the requested repository workflow are explicitly allowed; do not claim Git is inspection-only. Outside those Git operations, do not create or modify ordinary project files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
+  return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} when no usable workspaceId exists for a project folder or isolated worktree, then keep using that workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted ordinary project-file modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, package scripts, and Git lifecycle commands including add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. Git writes required to complete the requested repository workflow are explicitly allowed; do not claim Git is inspection-only. Outside those Git operations, do not create or modify ordinary project files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
 }
 
 function formatVisibleAgent(agent: {
@@ -754,7 +756,7 @@ function registerCodexProcessTools(
       description:
         "Run a command inside an open workspace. Returns its result when it exits during the yield window, otherwise returns a sessionId for write_stdin. Use this for file inspection, tests, builds, package scripts, long-running processes, and Git lifecycle writes such as git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. These Git writes are explicitly allowed when needed to complete the requested repository workflow. Local agent and subagent commands remain blocked by the web-only policy. Call open_workspace first and pass workspaceId.",
       inputSchema: {
-        workspaceId: z.string().describe("Workspace identifier returned by open_workspace."),
+        workspaceId: z.string().describe(workspaceIdDescription),
         cmd: z.string().min(1).describe("Shell command to execute."),
         tty: z
           .boolean()
@@ -906,7 +908,7 @@ function registerCodexProcessTools(
   );
 }
 
-function createMcpServer(
+export function createMcpServer(
   config: ServerConfig,
   workspaces: WorkspaceRegistry,
   reviewCheckpoints: ReturnType<typeof createReviewCheckpointManager>,
@@ -920,7 +922,7 @@ function createMcpServer(
       title: "DevSpace",
       version: "0.1.0",
       description:
-        "Web-model-only local coding workspace for MCP clients. Provides workspace-scoped file, search, edit, write, and shell tools without local agent delegation.",
+        "Web-model-only coding tools for project workspaces. Reuse each project's workspaceId and perform work directly without local agent delegation.",
     },
     {
       instructions: serverInstructions(config),
@@ -1076,7 +1078,7 @@ function createMcpServer(
           .enum(["checkout", "worktree"])
           .optional()
           .describe(
-            "Defaults to checkout. Use checkout to work in the actual directory. Use worktree to create an isolated managed Git worktree for parallel work.",
+            "Defaults to checkout, which works in the actual directory. Use worktree for isolated or parallel Git work.",
           ),
         baseRef: z
           .string()
@@ -1098,23 +1100,26 @@ function createMcpServer(
             managed: z.boolean(),
           })
           .optional(),
-        agentsFiles: z.array(workspaceAgentsFileOutputSchema),
-        availableAgentsFiles: z.array(workspaceAvailableAgentsFileOutputSchema),
-        skills: z.array(workspaceSkillOutputSchema),
-        agentProviders: z.array(workspaceLocalAgentProviderOutputSchema),
-        agents: z.array(workspaceLocalAgentOutputSchema),
-        skillDiagnostics: z.array(z.unknown()),
+        agentsFiles: z.array(workspaceAgentsFileOutputSchema).optional(),
+        availableAgentsFiles: z.array(workspaceAvailableAgentsFileOutputSchema).optional(),
+        skills: z.array(workspaceSkillOutputSchema).optional(),
+        agentProviders: z.array(workspaceLocalAgentProviderOutputSchema).optional(),
+        agents: z.array(workspaceLocalAgentOutputSchema).optional(),
+        skillDiagnostics: z.array(z.unknown()).optional(),
         access: accessSummaryOutputSchema,
         instruction: z.string(),
       },
       ...toolWidgetDescriptorMeta(config, "workspace"),
       annotations: { readOnlyHint: true },
     },
-    async ({ path, mode, baseRef }) => {
+    async ({ path, mode, baseRef }, { _meta }) => {
       const startedAt = performance.now();
       let context: Awaited<ReturnType<WorkspaceRegistry["openWorkspace"]>>;
       try {
-        context = await workspaces.openWorkspace({ path, mode, baseRef });
+        context = await workspaces.openWorkspace(
+          { path, mode, baseRef },
+          { conversationScopeId: openAiConversationScopeId(_meta) },
+        );
       } catch (error) {
         const content = [textBlock(openWorkspaceErrorText(config, path, error, toolNames))];
         logFailedToolResponse(config, {
@@ -1132,50 +1137,72 @@ function createMcpServer(
         };
       }
 
-      const { workspace, agentsFiles, availableAgentsFiles } = context;
+      const {
+        workspace,
+        agentsFiles,
+        availableAgentsFiles,
+        workspaceReused,
+        includeBootstrapContext,
+      } = context;
       if (config.widgets === "changes") {
-        void reviewCheckpoints.initializeWorkspace({
+        await reviewCheckpoints.initializeWorkspace({
           workspaceId: workspace.id,
           root: workspace.root,
         });
       }
-      const visibleSkills = workspace.skills
+      const cardSkills = workspace.skills
         .filter((skill) => !skill.disableModelInvocation)
         .map((skill) => ({
           name: skill.name,
           description: skill.description,
           path: formatPathForPrompt(skill.filePath),
         }));
-      const visibleAgentProviders = config.subagents ? localAgentProviders : [];
-      const visibleAgents = workspace.agentProfiles.map((profile) => {
+      const cardAgentProviders = config.subagents ? localAgentProviders : [];
+      const cardAgents = workspace.agentProfiles.map((profile) => {
         const summary = summarizeLocalAgentProfile(profile);
-        const availability = visibleAgentProviders.find((provider) => provider.name === summary.provider);
+        const availability = cardAgentProviders.find((provider) => provider.name === summary.provider);
         return {
           ...summary,
           providerAvailable: availability?.available,
           providerUnavailableReason: availability?.reason,
         };
       });
-      const loadedAgentsFiles = agentsFiles.map((file) => ({
+      const cardAgentsFiles = agentsFiles.map((file) => ({
         path: formatAgentsPath(file.path, workspace.root),
         content: file.content,
       }));
-      const availableAgentsFileOutputs = availableAgentsFiles.map((file) => ({
+      const cardAvailableAgentsFiles = availableAgentsFiles.map((file) => ({
         path: formatAgentsPath(file.path, workspace.root),
       }));
       const access = accessSummary(config);
       const accessText = formatAccessSummary(access);
-      const baseInstruction = config.skillsEnabled
-        ? "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding."
-        : "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.";
-      const instruction = workspace.mode === "worktree"
-        ? `${baseInstruction} After the task is fully verified and this worktree has been committed, pushed, and merged into the source repository's current main branch, call ${toolNames.completeWorkspace} exactly once with this workspaceId. It will verify the merge, archive the worktree HEAD remotely, and remove the local worktree.`
-        : baseInstruction;
+      const visibleSkills = includeBootstrapContext ? cardSkills : [];
+      const visibleAgentProviders = includeBootstrapContext ? cardAgentProviders : [];
+      const visibleAgents = includeBootstrapContext ? cardAgents : [];
+      const loadedAgentsFiles = includeBootstrapContext ? cardAgentsFiles : [];
+      const availableAgentsFileOutputs = includeBootstrapContext ? cardAvailableAgentsFiles : [];
+      const cardInstruction = config.skillsEnabled
+        ? "Use this workspaceId for subsequent work in this project. Keep reusing it while working in this project. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding."
+        : "Use this workspaceId for subsequent work in this project. Keep reusing it while working in this project. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.";
+      const worktreeInstruction = `${cardInstruction} After the task is fully verified and this worktree has been committed, pushed, and merged into the source repository's current main branch, call ${toolNames.completeWorkspace} exactly once with this workspaceId. It will verify the merge, archive the worktree HEAD remotely, and remove the local worktree.`;
+      const instruction = workspaceReused
+        ? [
+            `Workspace already open as ${workspace.id}.`,
+            "Continue with this workspaceId.",
+            "Keep following the project instructions, nested instruction files, skills, agent profiles, and diagnostics already provided for this workspace.",
+          ].join("\n\n")
+        : workspace.mode === "worktree"
+          ? worktreeInstruction
+          : cardInstruction;
       const resultContent: ToolContent[] = [
         {
           type: "text" as const,
           text: [
-            `Opened workspace ${workspace.id}`,
+            workspaceReused
+              ? `Workspace already open as ${workspace.id}.`
+              : workspace.mode === "worktree"
+                ? `Opened isolated worktree workspace ${workspace.id}.`
+                : `Opened workspace ${workspace.id}.`,
             `Root: ${workspace.root}`,
             `Mode: ${workspace.mode}`,
             loadedAgentsFiles.length > 0
@@ -1217,13 +1244,24 @@ function createMcpServer(
             workspaceId: workspace.id,
             root: workspace.root,
             path: workspace.root,
+            mode: workspace.mode,
+            workspaceReused,
+            includeBootstrapContext,
+            sourceRoot: workspace.sourceRoot,
+            worktree: workspace.worktree,
+            agentsFiles: cardAgentsFiles,
+            availableAgentsFiles: cardAvailableAgentsFiles,
+            skills: cardSkills,
+            agentProviders: cardAgentProviders,
+            agents: cardAgents,
+            instruction: cardInstruction,
             summary: {
               mode: workspace.mode,
-              agentsFiles: loadedAgentsFiles.length,
-              availableAgentsFiles: availableAgentsFileOutputs.length,
-              skills: visibleSkills.length,
-              agentProviders: visibleAgentProviders.length,
-              agents: visibleAgents.length,
+              agentsFiles: cardAgentsFiles.length,
+              availableAgentsFiles: cardAvailableAgentsFiles.length,
+              skills: cardSkills.length,
+              agentProviders: cardAgentProviders.length,
+              agents: cardAgents.length,
               skillDiagnostics: workspace.skillDiagnostics.length,
               allowedRoots: access.allowedRoots.length,
             },
@@ -1235,12 +1273,16 @@ function createMcpServer(
           mode: workspace.mode,
           sourceRoot: workspace.sourceRoot,
           worktree: workspace.worktree,
-          agentsFiles: loadedAgentsFiles,
-          availableAgentsFiles: availableAgentsFileOutputs,
-          skills: visibleSkills,
-          agentProviders: visibleAgentProviders,
-          agents: visibleAgents,
-          skillDiagnostics: workspace.skillDiagnostics,
+          ...(includeBootstrapContext
+            ? {
+                agentsFiles: loadedAgentsFiles,
+                availableAgentsFiles: availableAgentsFileOutputs,
+                skills: visibleSkills,
+                agentProviders: visibleAgentProviders,
+                agents: visibleAgents,
+                skillDiagnostics: workspace.skillDiagnostics,
+              }
+            : {}),
           access,
           instruction,
         },
@@ -1315,7 +1357,7 @@ function createMcpServer(
       title: "Read file",
       description:
         [
-          "Read a file inside an open workspace. Use this for file inspection instead of shell commands like cat or sed. Call open_workspace first and pass workspaceId.",
+          "Read a file in a workspace. Use this for file inspection instead of shell commands like cat or sed.",
           "Use this tool to inspect relevant AGENTS.md or CLAUDE.md files listed by open_workspace before working in nested directories.",
           config.skillsEnabled
             ? "If available skills were returned and a task matches one, read that skill's path before proceeding. Skill paths may be outside the workspace; only advertised SKILL.md files and files under already-loaded skill directories are readable."
@@ -1326,7 +1368,7 @@ function createMcpServer(
       inputSchema: {
         workspaceId: z
           .string()
-          .describe("Workspace identifier returned by open_workspace."),
+          .describe(workspaceIdDescription),
         path: z
           .string()
           .describe(
@@ -1412,11 +1454,11 @@ function createMcpServer(
     {
       title: "Write file",
       description:
-        `Create or completely overwrite a file inside an open workspace. Prefer ${toolNames.edit} for targeted changes to existing files. Call open_workspace first and pass workspaceId.`,
+        `Create or completely overwrite a file in a workspace. Prefer ${toolNames.edit} for targeted changes to existing files.`,
       inputSchema: {
         workspaceId: z
           .string()
-          .describe("Workspace identifier returned by open_workspace."),
+          .describe(workspaceIdDescription),
         path: z
           .string()
           .describe("File path to write, relative to the workspace root."),
@@ -1486,11 +1528,11 @@ function createMcpServer(
     {
       title: "Edit file",
       description:
-        `Edit one file inside an open workspace by replacing exact text blocks. Prefer this over ${toolNames.write} for targeted changes. Each oldText must match a unique, non-overlapping region of the original file; merge nearby changes into one edit and keep oldText as small as possible while still unique. Call open_workspace first and pass workspaceId.`,
+        `Edit one file in a workspace by replacing exact text blocks. Prefer this over ${toolNames.write} for targeted changes. Each oldText must match a unique, non-overlapping region of the original file; merge nearby changes into one edit and keep oldText as small as possible while still unique.`,
       inputSchema: {
         workspaceId: z
           .string()
-          .describe("Workspace identifier returned by open_workspace."),
+          .describe(workspaceIdDescription),
         path: z
           .string()
           .describe("File path to edit, relative to the workspace root."),
@@ -1578,11 +1620,11 @@ function createMcpServer(
       {
         title: "Apply patch",
         description:
-          "Apply one Codex-style patch inside an open workspace. Supports adding, overwriting, updating, deleting, and moving files. Use this for all file modifications. Paths must be relative to the workspace. Call open_workspace first and pass workspaceId.",
+          "Apply one Codex-style patch in a workspace. Supports adding, overwriting, updating, deleting, and moving files. Use this for all file modifications. Paths must be relative to the workspace.",
         inputSchema: {
           workspaceId: z
             .string()
-            .describe("Workspace identifier returned by open_workspace."),
+            .describe(workspaceIdDescription),
           patch: z
             .string()
             .describe("Patch text enclosed by *** Begin Patch and *** End Patch markers."),
@@ -1653,11 +1695,11 @@ function createMcpServer(
       {
         title: "Show changes",
         description:
-          "Show aggregate file changes for an open workspace. If the current turn successfully modified files, call this exactly once after the final related file change and before your final response so the user can inspect the combined diff for the turn. Do not call it after every individual file change, and do not skip it because prior file-change tools already displayed per-tool diffs.",
+          "Show the changes made in this turn for an open workspace. Call this once after the final related file change and before your final response so the user can review the combined diff. Do not call it after each individual file change.",
         inputSchema: {
           workspaceId: z
             .string()
-            .describe("Workspace identifier returned by open_workspace."),
+            .describe(workspaceIdDescription),
         },
         outputSchema: resultOutputSchema(),
         ...toolWidgetDescriptorMeta(config, "show_changes"),
@@ -1669,7 +1711,6 @@ function createMcpServer(
         const review = await reviewCheckpoints.reviewChanges({
           workspaceId,
           root: workspace.root,
-          since: "last_shown",
           markReviewed: true,
         });
 
@@ -1709,11 +1750,11 @@ function createMcpServer(
       {
         title: "Grep",
         description:
-          "Search file contents inside an open workspace. Use this before broad reads when looking for symbols, text, or usage sites. Respects project ignore rules. Call open_workspace first and pass workspaceId.",
+          "Search file contents in a workspace. Use this before broad reads when looking for symbols, text, or usage sites. Respects project ignore rules.",
         inputSchema: {
           workspaceId: z
             .string()
-            .describe("Workspace identifier returned by open_workspace."),
+            .describe(workspaceIdDescription),
           pattern: z.string().describe("Search pattern."),
           path: z
             .string()
@@ -1782,11 +1823,11 @@ function createMcpServer(
       {
         title: "Glob",
         description:
-          "Find files by glob pattern inside an open workspace. Use this to discover filenames or narrow file sets before reading. Respects project ignore rules. Call open_workspace first and pass workspaceId.",
+          "Find files by glob pattern in a workspace. Use this to discover filenames or narrow file sets before reading. Respects project ignore rules.",
         inputSchema: {
           workspaceId: z
             .string()
-            .describe("Workspace identifier returned by open_workspace."),
+            .describe(workspaceIdDescription),
           pattern: z.string().describe("File glob pattern."),
           path: z
             .string()
@@ -1852,11 +1893,11 @@ function createMcpServer(
       {
         title: "Ls",
         description:
-          "List a directory inside an open workspace. Use this for directory inspection before reading files. Call open_workspace first and pass workspaceId.",
+          "List a directory in a workspace. Use this for directory inspection before reading files.",
         inputSchema: {
           workspaceId: z
             .string()
-            .describe("Workspace identifier returned by open_workspace."),
+            .describe(workspaceIdDescription),
           path: z
             .string()
             .describe(
@@ -1925,11 +1966,11 @@ function createMcpServer(
       inputSchema: {
         workspaceId: z
           .string()
-          .describe("Workspace identifier returned by open_workspace."),
+          .describe(workspaceIdDescription),
         command: z
           .string()
           .describe(
-            `Shell command to run. Must not create or modify project files; use ${toolNames.edit} or ${toolNames.write} for file changes.`,
+            `Shell command to run. Git lifecycle writes are allowed; for ordinary project-file changes use ${toolNames.edit} or ${toolNames.write}.`,
           ),
         workingDirectory: z
           .string()
