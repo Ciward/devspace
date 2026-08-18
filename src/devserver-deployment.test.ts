@@ -12,8 +12,14 @@ const compose = await readFile(
 
 const scriptsCopy = dockerfile.indexOf("COPY scripts ./scripts");
 const npmCi = dockerfile.indexOf("RUN npm ci");
+const vcsArgument = dockerfile.indexOf("ARG DEVSERVER_VCS_REF");
+const runtimeToolchain = dockerfile.indexOf("RUN apt-get update");
 assert.notEqual(scriptsCopy, -1, "Docker build must copy postinstall scripts before npm ci");
 assert.ok(scriptsCopy < npmCi, "Docker build must copy postinstall scripts before npm ci");
+assert.ok(
+  vcsArgument > runtimeToolchain,
+  "Changing only the deployed revision must not invalidate the runtime toolchain layer",
+);
 
 assert.match(compose, /pids_limit:\s*4096/);
 assert.ok(

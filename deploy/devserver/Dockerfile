@@ -13,13 +13,6 @@ RUN npm run build && npm prune --omit=dev
 
 FROM node:26.3.0-bookworm
 
-ARG DEVSERVER_VCS_REF=unknown
-
-LABEL org.opencontainers.image.source="https://github.com/Ciward/devspace" \
-      org.opencontainers.image.revision="${DEVSERVER_VCS_REF}" \
-      org.opencontainers.image.title="DevServer" \
-      org.opencontainers.image.description="Web-only DevSpace Docker development environment"
-
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/ubuntu \
     PATH=/usr/local/go/bin:/home/ubuntu/.local/bin:/home/ubuntu/.npm-global/bin:$PATH
@@ -66,6 +59,13 @@ COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/package-lock.json /opt/dev
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/node_modules /opt/devspace/node_modules
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/dist /opt/devspace/dist
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/skills /opt/devspace/skills
+
+ARG DEVSERVER_VCS_REF=unknown
+
+LABEL org.opencontainers.image.source="https://github.com/Ciward/devspace" \
+      org.opencontainers.image.revision="${DEVSERVER_VCS_REF}" \
+      org.opencontainers.image.title="DevServer" \
+      org.opencontainers.image.description="Web-only DevSpace Docker development environment"
 
 WORKDIR /home/ubuntu/work
 USER ubuntu
