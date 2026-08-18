@@ -6,8 +6,11 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 
 ## Boundaries
 
-- The host Docker socket is not mounted. DevServer cannot control TokenLab's
-  production containers or Docker volumes.
+- The host Docker socket is not mounted, so container processes have no direct
+  Docker API path. This does not reduce privileges obtained through SSH: if the
+  dedicated key is authorized for an account that can operate Docker, DevServer
+  can exercise that authority through an SSH command. In particular, access to
+  the TokenLabOVH `ubuntu` account must be treated as production-admin access.
 - DevSpace state, OAuth credentials, SSH credentials, and tool caches persist in
   `/home/ubuntu/.devserver/home` on the server.
 - Cloudflare Tunnel credentials persist separately in
