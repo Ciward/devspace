@@ -1,0 +1,105 @@
+name: devserver
+
+services:
+  devserver:
+    build:
+      context: ../..
+      dockerfile: deploy/devserver/Dockerfile
+      args:
+        DEVSERVER_VCS_REF: ${DEVSERVER_VCS_REF:-unknown}
+    image: devspace-cheap:devserver
+    container_name: devserver
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      HOME: /home/ubuntu
+      HOST: 0.0.0.0
+      PORT: 7676
+      DEVSPACE_CONFIG_DIR: /home/ubuntu/.devspace
+      DEVSPACE_STATE_DIR: /home/ubuntu/.local/share/devspace
+      DEVSPACE_ALLOWED_ROOTS: /home/ubuntu/work
+      DEVSPACE_WORKTREE_ROOT: /home/ubuntu/work/.devspace-worktrees
+      DEVSPACE_WORKTREE_MAX_COUNT: "10"
+      DEVSPACE_WORKTREE_ARCHIVE_REMOTE: origin
+      DEVSPACE_PUBLIC_BASE_URL: ${DEVSERVER_PUBLIC_BASE_URL:-https://devserver.ciward.dpdns.org}
+      DEVSPACE_ALLOWED_HOSTS: localhost,127.0.0.1,::1,devserver,devserver.ciward.dpdns.org
+      DEVSPACE_TOOL_MODE: full
+      DEVSPACE_WIDGETS: changes
+      DEVSPACE_SKILLS: "1"
+      DEVSPACE_SUBAGENTS: "0"
+      DEVSPACE_ARTIFACTS: "0"
+      DEVSPACE_TRUST_PROXY: "1"
+      DEVSPACE_LOG_FORMAT: pretty
+      DEVSPACE_LOG_TOOL_CALLS: "1"
+      DEVSPACE_LOG_SHELL_COMMANDS: "0"
+      NODE_ENV: production
+    volumes:
+      - ${DEVSERVER_HOME:-/home/ubuntu/.devserver/home}:/home/ubuntu
+      - ${DEVSERVER_WORK_ROOT:-/home/ubuntu/work}:/home/ubuntu/work
+    ports:
+      - 127.0.0.1:17676:7676
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=2g,uid=1000,gid=1000,mode=1777
+      - /run:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=0755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: 4.0
+    mem_limit: 8g
+    memswap_limit: 12g
+    pids_limit: 4096
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:7676/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.6.1@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283
+    container_name: devserver-cloudflared
+    restart: unless-stopped
+    user: "1000:1000"
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --config
+      - /etc/cloudflared/config.yml
+      - run
+    volumes:
+      - ${DEVSERVER_CLOUDFLARED_DIR:-/home/ubuntu/.devserver/cloudflared}:/etc/cloudflared:ro
+    networks:
+      - edge
+    depends_on:
+      devserver:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,uid=1000,gid=1000,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.25
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 128
+    stop_grace_period: 30s
+
+networks:
+  edge:
+    name: devserver-edge
+    driver: bridge
