@@ -22,6 +22,7 @@ assert.ok(
 );
 
 assert.match(compose, /pids_limit:\s*4096/);
+assert.match(compose, /cloudflare\/cloudflared:2026\.8\.2@sha256:/);
 assert.ok(
   compose.includes("${DEVSERVER_WORK_ROOT:-/home/ubuntu/work}:/home/ubuntu/work"),
   "Compose must preserve the server and container workspace path",
