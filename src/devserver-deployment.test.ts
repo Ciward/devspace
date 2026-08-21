@@ -28,3 +28,7 @@ assert.ok(
 );
 assert.match(compose, /DEVSPACE_SUBAGENTS:\s*"0"/);
 assert.doesNotMatch(compose, /docker\.sock/);
+
+for (const tool of ["gh", "shellcheck", "tmux", "zsh", "rust-toolchain", "pnpm@10.23.0", "yarn@1.22.22"]) {
+  assert.match(dockerfile, new RegExp(tool), `DevServer image should include ${tool}`);
+}

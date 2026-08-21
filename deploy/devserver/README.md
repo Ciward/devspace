@@ -20,6 +20,14 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 - The container is limited to 4 CPUs, 8 GiB memory, 12 GiB memory plus swap, and
   4096 PIDs. Its root filesystem is read-only and all Linux capabilities are
   dropped.
+- The image includes Node 26.3.0/npm 11.16.0, Go 1.26.6, Rust/Cargo 1.94.1,
+  GitHub CLI 2.86.0, pnpm 10.23.0, yarn 1.22.22, zsh, tmux, shellcheck,
+  GnuPG, PostgreSQL client headers, and Python build headers.
+- A persistent Python 3.12.11 environment is available at
+  `/home/ubuntu/.venvs/local-python`; it contains the non-secret user packages
+  from the Mac's user Python environment. `uv` 0.8.17 manages it.
+- Git global identity, HTTP/1.1, large push buffer, Git LFS, GitHub CLI aliases,
+  and GitHub HTTPS credential integration match the Mac's safe settings.
 
 ## Server layout
 
@@ -27,6 +35,8 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 /home/ubuntu/work/                  host and container workspace root
 /home/ubuntu/.devserver/home/       persistent container home and DevSpace state
 /home/ubuntu/.devserver/cloudflared tunnel config and credentials
+/home/ubuntu/.devserver/home/.config/gh/ GitHub CLI state
+/home/ubuntu/.devserver/home/.venvs/  persistent Python environments
 ```
 
 The public connector URL is `https://devserver.ciward.dpdns.org/mcp`. A dedicated
@@ -52,6 +62,11 @@ file may contain an empty JSON object because Compose supplies the runtime
 settings. The auth file must contain a freshly generated `ownerToken` and must
 never be committed, printed in logs, or copied into the Compose environment.
 
+The current GitHub CLI login is persisted in
+`/home/ubuntu/.devserver/home/.config/gh/hosts.yml` with mode `0600`. GitHub
+operations use HTTPS through `gh auth git-credential`. Revoke it with
+`gh auth logout --hostname github.com` inside the container when needed.
+
 ## SSH access
 
 Generate a dedicated Ed25519 key inside
@@ -60,3 +75,7 @@ only its public key in each approved remote account's `authorized_keys`, then
 write a minimal SSH config containing the approved host aliases and any required
 `ProxyJump` relationships. Do not copy an operator workstation's private keys
 into DevServer.
+
+Local model-agent CLIs such as Codex, Claude Code, OpenCode, and OpenClaw are
+intentionally not installed. This environment remains web-model-only and keeps
+`DEVSPACE_SUBAGENTS=0`.
