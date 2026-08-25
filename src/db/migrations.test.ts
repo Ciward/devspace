@@ -84,9 +84,16 @@ function assertCombinedMigration(sqlite: Database.Database): void {
     .get();
   assert.deepEqual(conversationTable, { name: "workspace_conversation_bindings" });
   assert.deepEqual(
-    sqlite.prepare("select version, name from devspace_schema_migrations where version = 5").get(),
-    { version: 5, name: "workspace-conversation-and-worktree-archive-state" },
+    sqlite.prepare("select version, name from devspace_schema_migrations where version = 8").get(),
+    { version: 8, name: "workspace-and-local-agent-state-convergence" },
   );
+
+  const agentColumns = sqlite.prepare("pragma table_info(local_agent_sessions)").all() as Array<{
+    name: string;
+  }>;
+  assert.equal(agentColumns.some((column) => column.name === "effort"), true);
+  assert.equal(agentColumns.some((column) => column.name === "error_code"), true);
+  assert.equal(agentColumns.some((column) => column.name === "error_retryable"), true);
 }
 
 for (const options of [

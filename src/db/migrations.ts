@@ -32,6 +32,21 @@ const migrations: Migration[] = [
     name: "workspace-conversation-and-worktree-archive-state",
     up: migrateWorkspaceConversationAndWorktreeArchiveState,
   },
+  {
+    version: 6,
+    name: "local-agent-structured-errors",
+    up: migrateLocalAgentStructuredErrors,
+  },
+  {
+    version: 7,
+    name: "local-agent-effort-rename",
+    up: migrateLocalAgentEffortRename,
+  },
+  {
+    version: 8,
+    name: "workspace-and-local-agent-state-convergence",
+    up: migrateWorkspaceAndLocalAgentStateConvergence,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -165,7 +180,7 @@ function migrateLocalAgentSessions(sqlite: Database.Database): void {
       profile_name text not null,
       provider text not null,
       model text,
-      thinking text,
+      effort text,
       provider_session_id text,
       status text not null,
       latest_response text,
@@ -184,10 +199,11 @@ function migrateLocalAgentSessions(sqlite: Database.Database): void {
       on local_agent_sessions(provider_session_id);
   `);
 
-  addColumnIfMissing(sqlite, "local_agent_sessions", "thinking", "text");
+  addColumnIfMissing(sqlite, "local_agent_sessions", "effort", "text");
 }
 
 function migrateWorktreeArchiveState(sqlite: Database.Database): void {
+  migrateWorkspaceState(sqlite);
   addColumnIfMissing(sqlite, "workspace_sessions", "archive_remote", "text");
   addColumnIfMissing(sqlite, "workspace_sessions", "archive_ref", "text");
   addColumnIfMissing(sqlite, "workspace_sessions", "archived_at", "text");
@@ -215,6 +231,42 @@ function migrateWorkspaceConversationBindings(sqlite: Database.Database): void {
 function migrateWorkspaceConversationAndWorktreeArchiveState(sqlite: Database.Database): void {
   migrateWorkspaceConversationBindings(sqlite);
   migrateWorktreeArchiveState(sqlite);
+}
+
+function migrateLocalAgentStructuredErrors(sqlite: Database.Database): void {
+  migrateLocalAgentSessions(sqlite);
+  addColumnIfMissing(sqlite, "local_agent_sessions", "error_code", "text");
+  addColumnIfMissing(sqlite, "local_agent_sessions", "error_retryable", "text");
+}
+
+function migrateLocalAgentEffortRename(sqlite: Database.Database): void {
+  migrateLocalAgentSessions(sqlite);
+  const columns = sqlite.prepare("pragma table_info(local_agent_sessions)").all() as Array<{
+    name: string;
+  }>;
+  const names = new Set(columns.map((column) => column.name));
+  if (names.has("effort")) {
+    if (names.has("thinking")) {
+      sqlite.exec(`
+        update local_agent_sessions
+        set effort = thinking
+        where effort is null and thinking is not null
+      `);
+    }
+    return;
+  }
+  if (!names.has("thinking")) {
+    addColumnIfMissing(sqlite, "local_agent_sessions", "effort", "text");
+    return;
+  }
+  sqlite.exec("alter table local_agent_sessions rename column thinking to effort");
+}
+
+function migrateWorkspaceAndLocalAgentStateConvergence(sqlite: Database.Database): void {
+  migrateWorkspaceConversationBindings(sqlite);
+  migrateWorktreeArchiveState(sqlite);
+  migrateLocalAgentStructuredErrors(sqlite);
+  migrateLocalAgentEffortRename(sqlite);
 }
 
 function addColumnIfMissing(

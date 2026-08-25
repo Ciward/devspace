@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
-import { loadLocalAgentProfiles } from "./local-agent-profiles.js";
+import { loadLocalAgentProfiles, summarizeLocalAgentProfile } from "./local-agent-profiles.js";
 
 const root = await mkdtemp(join(tmpdir(), "devspace-agent-profiles-test-"));
 
@@ -35,7 +35,7 @@ try {
       'description: "Project reviewer #1."',
       "provider: claude",
       "model: sonnet",
-      "thinking: high",
+      "effort: high",
       "---",
       "",
       "Project body.",
@@ -65,7 +65,20 @@ try {
   });
   const profiles = await loadLocalAgentProfiles(enabledConfig, workspaceRoot);
 
-  assert.deepEqual(profiles, []);
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0]?.name, "reviewer");
+  assert.equal(profiles[0]?.description, "Project reviewer #1.");
+  assert.equal(profiles[0]?.provider, "claude");
+  assert.equal(profiles[0]?.model, "sonnet");
+  assert.equal(profiles[0]?.effort, "high");
+  assert.equal(profiles[0]?.body, "Project body.");
+  assert.deepEqual(summarizeLocalAgentProfile(profiles[0]!), {
+    name: "reviewer",
+    description: "Project reviewer #1.",
+    provider: "claude",
+    model: "sonnet",
+    effort: "high",
+  });
 
   await writeFile(
     join(workspaceRoot, ".devspace", "agents", "custom.md"),
@@ -81,7 +94,7 @@ try {
     ].join("\n"),
   );
   const profilesWithInvalid = await loadLocalAgentProfiles(enabledConfig, workspaceRoot);
-  assert.deepEqual(profilesWithInvalid, []);
+  assert.deepEqual(profilesWithInvalid.map((profile) => profile.name), ["reviewer"]);
 
   const disabledConfig = loadConfig({
     DEVSPACE_CONFIG_DIR: configDir,

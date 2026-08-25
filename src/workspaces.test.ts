@@ -26,7 +26,20 @@ test("a checkout exposes initial and nested instruction context while filtering 
     opened.availableAgentsFiles.map((file) => file.path),
     [join(context.root, "nested", "AGENTS.md")],
   );
-  assert.deepEqual(opened.workspace.agentProfiles, []);
+  assert.deepEqual(
+    opened.workspace.agentProfiles.map((profile) => ({
+      name: profile.name,
+      description: profile.description,
+      provider: profile.provider,
+      body: profile.body,
+    })),
+    [{
+      name: "reviewer",
+      description: "Read-only project reviewer.",
+      provider: "codex",
+      body: "Review only.",
+    }],
+  );
 
   if (platform() !== "win32") {
     const unsafeAgentDir = join(context.root, ".pi", "unsafe-agent");

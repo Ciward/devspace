@@ -426,7 +426,13 @@ async function fixture(
     PORT: "1",
   });
   const config = options.enableSubagentsForFailureInjection
-    ? { ...loadedConfig, subagents: true }
+    ? {
+        ...loadedConfig,
+        subagents: {
+          enabled: true,
+          providers: [{ id: "codex" as const, enabled: true }],
+        },
+      }
     : loadedConfig;
   const openStore = () => {
     const store = new SqliteWorkspaceStore(stateDir);

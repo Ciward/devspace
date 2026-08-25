@@ -35,7 +35,7 @@ const config: ServerConfig = {
   skillPaths: [],
   devspaceSkillsDir: "/Users/alice/.devspace/skills",
   devspaceAgentsDir: "/Users/alice/.devspace/agents",
-  subagents: false,
+  subagents: { enabled: false, providers: [] },
   agentDir: "/Users/alice/.codex",
   logging: {
     level: "info",
