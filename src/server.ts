@@ -929,7 +929,7 @@ export function createMcpServer(
       title: "DevSpace",
       version: "0.1.0",
       description:
-        "Web-model-only coding tools for project workspaces. Reuse each project's workspaceId and perform work directly without local agent delegation.",
+        "Web-model-orchestrated coding tools for project workspaces. Reuse each project's workspaceId, perform work directly, and delegate only through configured DevSpace Subagents when useful.",
     },
     {
       instructions: serverInstructions(config),

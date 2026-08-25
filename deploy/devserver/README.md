@@ -16,7 +16,9 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 - Cloudflare Tunnel credentials persist separately in
   `/home/ubuntu/.devserver/cloudflared`.
 - Only `/home/ubuntu/work` is exposed as an allowed workspace root.
-- Local coding agents and subagents remain disabled by `devspace-cheap`.
+- Subagent delegation is available only through DevSpace's configured Codex
+  provider. The deployed config locks Codex to `gpt-5.6-luna` with `max`
+  reasoning and rejects model or effort overrides.
 - The container is limited to 4 CPUs, 8 GiB memory, 12 GiB memory plus swap, and
   4096 PIDs. Its root filesystem is read-only and all Linux capabilities are
   dropped.
@@ -76,6 +78,9 @@ write a minimal SSH config containing the approved host aliases and any required
 `ProxyJump` relationships. Do not copy an operator workstation's private keys
 into DevServer.
 
-Local model-agent CLIs such as Codex, Claude Code, OpenCode, and OpenClaw are
-intentionally not installed. This environment remains web-model-only and keeps
-`DEVSPACE_SUBAGENTS=0`.
+Local model-agent CLIs such as Codex, Claude Code, OpenCode, and OpenClaw
+remain blocked as direct shell commands. Codex is installed in the image as a
+known-good fallback, checked for updates when the container starts, and exposed
+only through DevSpace's policy-enforced `devspace agents` commands. The web
+model remains the orchestrator and `DEVSPACE_SUBAGENTS=1` enables that bounded
+delegation path.

@@ -21,7 +21,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/ubuntu \
     CARGO_HOME=/home/ubuntu/.cargo \
     RUSTUP_HOME=/usr/local/rustup \
-    PATH=/usr/local/cargo/bin:/usr/local/go/bin:/home/ubuntu/.local/bin:/home/ubuntu/.npm-global/bin:$PATH
+    PATH=/usr/local/cargo/bin:/usr/local/go/bin:/home/ubuntu/.local/bin:/home/ubuntu/.npm-global/current/bin:$PATH
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -90,18 +90,19 @@ COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/package-lock.json /opt/dev
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/node_modules /opt/devspace/node_modules
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/dist /opt/devspace/dist
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/skills /opt/devspace/skills
+COPY --chmod=0755 deploy/devserver/codex-bootstrap.sh /opt/devspace/bin/codex-bootstrap.sh
 
 ARG DEVSERVER_VCS_REF=unknown
 
 LABEL org.opencontainers.image.source="https://github.com/Ciward/devspace" \
       org.opencontainers.image.revision="${DEVSERVER_VCS_REF}" \
       org.opencontainers.image.title="DevServer" \
-      org.opencontainers.image.description="Web-only DevSpace Docker development environment"
+      org.opencontainers.image.description="Web-orchestrated DevSpace Docker development environment"
 
-RUN npm install --global pnpm@10.23.0 yarn@1.22.22
+RUN npm install --global @openai/codex@0.149.1 pnpm@10.23.0 yarn@1.22.22
 
 WORKDIR /home/ubuntu/work
 USER ubuntu
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "/opt/devspace/dist/cli.js", "serve"]
+CMD ["/opt/devspace/bin/codex-bootstrap.sh", "node", "/opt/devspace/dist/cli.js", "serve"]

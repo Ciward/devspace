@@ -9,6 +9,10 @@ const compose = await readFile(
   new URL("../deploy/devserver/compose.yaml", import.meta.url),
   "utf8",
 );
+const codexBootstrap = await readFile(
+  new URL("../deploy/devserver/codex-bootstrap.sh", import.meta.url),
+  "utf8",
+);
 
 const scriptsCopy = dockerfile.indexOf("COPY scripts ./scripts");
 const npmCi = dockerfile.indexOf("RUN npm ci");
@@ -27,8 +31,15 @@ assert.ok(
   compose.includes("${DEVSERVER_WORK_ROOT:-/home/ubuntu/work}:/home/ubuntu/work"),
   "Compose must preserve the server and container workspace path",
 );
-assert.match(compose, /DEVSPACE_SUBAGENTS:\s*"0"/);
+assert.match(compose, /DEVSPACE_SUBAGENTS:\s*"1"/);
 assert.doesNotMatch(compose, /docker\.sock/);
+
+assert.match(dockerfile, /@openai\/codex@0\.149\.1/);
+assert.match(dockerfile, /COPY --chmod=0755 deploy\/devserver\/codex-bootstrap\.sh/);
+assert.match(dockerfile, /codex-bootstrap\.sh/);
+assert.match(codexBootstrap, /npm view @openai\/codex version/);
+assert.match(codexBootstrap, /app-server --help/);
+assert.match(codexBootstrap, /CODEX_COMMAND/);
 
 for (const tool of ["gh", "shellcheck", "tmux", "zsh", "rust-toolchain", "pnpm@10.23.0", "yarn@1.22.22"]) {
   assert.match(dockerfile, new RegExp(tool), `DevServer image should include ${tool}`);
