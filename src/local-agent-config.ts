@@ -9,7 +9,24 @@ const providerSchema = z.object({
   enabled: z.boolean(),
   model: z.string().trim().min(1).optional(),
   effort: z.string().trim().min(1).optional(),
-}).strict();
+  allowOverrides: z.boolean().optional(),
+}).strict().superRefine((value, context) => {
+  if (value.allowOverrides !== false) return;
+  if (!value.model) {
+    context.addIssue({
+      code: "custom",
+      path: ["model"],
+      message: "Subagent provider model is required when allowOverrides is false",
+    });
+  }
+  if (!value.effort) {
+    context.addIssue({
+      code: "custom",
+      path: ["effort"],
+      message: "Subagent provider effort is required when allowOverrides is false",
+    });
+  }
+});
 
 const subagentsSchema = z.object({
   enabled: z.boolean(),
@@ -31,6 +48,18 @@ const subagentsSchema = z.object({
 export type SubagentProviderConfig = z.infer<typeof providerSchema>;
 export type SubagentsConfig = z.infer<typeof subagentsSchema>;
 export type StoredSubagentsConfig = boolean | SubagentsConfig;
+
+export interface SubagentPolicyViolation {
+  field: "model" | "effort";
+  configured: string;
+  requested: string;
+}
+
+export interface SubagentSelection {
+  model?: string;
+  effort?: string;
+  policyViolation?: SubagentPolicyViolation;
+}
 
 export function resolveSubagentsConfig(
   value: unknown,
@@ -61,6 +90,45 @@ export function isSubagentProviderEnabled(
   provider: LocalAgentProvider,
 ): boolean {
   return config.enabled && subagentProviderConfig(config, provider)?.enabled === true;
+}
+
+export function resolveSubagentSelection(
+  provider: SubagentProviderConfig | undefined,
+  input: {
+    profileModel?: string;
+    profileEffort?: string;
+    modelOverride?: string;
+    effortOverride?: string;
+  },
+): SubagentSelection {
+  if (provider?.allowOverrides !== false) {
+    return {
+      model: input.modelOverride ?? input.profileModel ?? provider?.model,
+      effort: input.effortOverride ?? input.profileEffort ?? provider?.effort,
+    };
+  }
+
+  const model = provider.model!;
+  const effort = provider.effort!;
+  for (const requestedModel of [input.modelOverride, input.profileModel]) {
+    if (requestedModel && requestedModel !== model) {
+      return {
+        model,
+        effort,
+        policyViolation: { field: "model", configured: model, requested: requestedModel },
+      };
+    }
+  }
+  for (const requestedEffort of [input.effortOverride, input.profileEffort]) {
+    if (requestedEffort && requestedEffort !== effort) {
+      return {
+        model,
+        effort,
+        policyViolation: { field: "effort", configured: effort, requested: requestedEffort },
+      };
+    }
+  }
+  return { model, effort };
 }
 
 function legacySubagentsConfig(enabled: boolean): SubagentsConfig {

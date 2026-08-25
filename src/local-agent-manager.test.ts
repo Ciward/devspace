@@ -190,6 +190,80 @@ const unconfigured = await manager.start({
 assert.equal(unconfigured.isErr(), true);
 if (unconfigured.isErr()) assert.equal(unconfigured.error.code, "PROVIDER_NOT_CONFIGURED");
 
+const strictProfile: LocalAgentProfile = {
+  ...profile,
+  name: "strict-reviewer",
+  filePath: join(root, "strict-reviewer.md"),
+};
+const mismatchedStrictProfile: LocalAgentProfile = {
+  ...strictProfile,
+  name: "mismatched-strict-reviewer",
+  filePath: join(root, "mismatched-strict-reviewer.md"),
+  model: "gpt-5.6-sol",
+};
+const strictStore = new LocalAgentStore(join(root, "strict-state"));
+const strictManager = new LocalAgentManager({
+  store: strictStore,
+  drivers: [driver],
+  pool: new LocalAgentRuntimePool(),
+  loadProfiles: async () => [strictProfile, mismatchedStrictProfile],
+  allowedRoots: [root],
+  subagents: {
+    enabled: true,
+    providers: [{
+      id: "codex",
+      enabled: true,
+      model: "gpt-5.6-luna",
+      effort: "max",
+      allowOverrides: false,
+    }],
+  },
+});
+
+const strictOverride = await strictManager.start({
+  target: "codex",
+  prompt: "inspect",
+  workspaceId: scope.workspaceId,
+  workspaceRoot: root,
+  model: "gpt-5.6-sol",
+});
+assert.equal(strictOverride.isErr(), true);
+if (strictOverride.isErr()) {
+  assert.equal(strictOverride.error.code, "TARGET_POLICY_VIOLATION");
+  assert.equal(strictOverride.error.retryable, false);
+}
+
+const strictProfileMismatch = await strictManager.start({
+  target: "mismatched-strict-reviewer",
+  prompt: "inspect",
+  workspaceId: scope.workspaceId,
+  workspaceRoot: root,
+});
+assert.equal(strictProfileMismatch.isErr(), true);
+if (strictProfileMismatch.isErr()) {
+  assert.equal(strictProfileMismatch.error.code, "TARGET_POLICY_VIOLATION");
+}
+
+const strictRun = unwrap(await strictManager.start({
+  target: "strict-reviewer",
+  prompt: "strict run",
+  workspaceId: scope.workspaceId,
+  workspaceRoot: root,
+}));
+assert.equal(strictRun.model, "gpt-5.6-luna");
+assert.equal(strictRun.effort, "max");
+await waitFor(() => strictStore.get(strictRun.id)?.status === "idle");
+
+const strictContinueMismatch = await strictManager.continue(strictRun.id, "continue", {
+  effort: "high",
+}, scope);
+assert.equal(strictContinueMismatch.isErr(), true);
+if (strictContinueMismatch.isErr()) {
+  assert.equal(strictContinueMismatch.error.code, "TARGET_POLICY_VIOLATION");
+}
+await strictManager.close();
+runtimes.delete(strictRun.id);
+
 const disabledProvider = await manager.start({
   target: "pi",
   prompt: "inspect",

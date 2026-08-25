@@ -15,9 +15,7 @@ Discover usable targets instead of guessing names:
 devspace agents targets --json
 ```
 
-Configured profiles include a description and may define provider, model, effort, and task instructions. Choose a matching profile when one fits. Use a provider target when no profile fits or a specific provider is needed.
-
-Usually rely on the target's configured model and effort. Pass `--model` or `--effort` only with a value supported by that provider. DevSpace passes these values through without translating them between providers.
+Configured profiles include a description and may define provider, model, effort, and task instructions. Choose a matching profile when one fits. Use a provider target when no profile fits or a specific provider is needed. Always rely on the configured model and effort; deployment policy may lock both values.
 
 ## Start work
 
@@ -25,7 +23,6 @@ Give the subagent a self-contained brief. Include the objective, relevant paths,
 
 ```bash
 devspace agents run <profile-or-provider> "<brief>" --json
-devspace agents run <profile-or-provider> --model <model> --effort <effort> "<brief>" --json
 ```
 
 The result contains a DevSpace agent `id` and its current status. Execution continues independently, so retain the ID for later inspection or follow-up.

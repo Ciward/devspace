@@ -57,3 +57,22 @@ assert.deepEqual(catalog.profiles.map((profile) => profile.name), ["reviewer", "
 assert.equal(catalog.profiles[0]?.model, "gpt-default");
 assert.equal(catalog.profiles[0]?.effort, "medium");
 assert.equal(catalog.profiles[1]?.model, "gpt-custom");
+
+const strictConfig: SubagentsConfig = {
+  enabled: true,
+  providers: [{
+    id: "codex",
+    enabled: true,
+    model: "gpt-5.6-luna",
+    effort: "max",
+    allowOverrides: false,
+  }],
+};
+const strictStatuses = buildLocalAgentProviderStatuses(strictConfig, [
+  { name: "codex", available: true },
+]);
+const strictCatalog = buildLocalAgentCatalog(strictConfig, profiles, strictStatuses);
+assert.deepEqual(strictCatalog.providers.map((provider) => provider.id), ["codex"]);
+assert.deepEqual(strictCatalog.profiles.map((profile) => profile.name), ["reviewer"]);
+assert.equal(strictCatalog.profiles[0]?.model, "gpt-5.6-luna");
+assert.equal(strictCatalog.profiles[0]?.effort, "max");

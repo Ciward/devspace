@@ -141,6 +141,55 @@ assert.deepEqual(parseLocalAgentRunArgs(["codex", "--", "--json", "literal"]), {
 }
 
 {
+  const strictDefaults = [{
+    id: "codex",
+    enabled: true,
+    model: "gpt-5.6-luna",
+    effort: "max",
+    allowOverrides: false,
+  }] as const;
+  const raw = resolveLocalAgentTarget("codex", profiles, undefined, undefined, strictDefaults);
+  assert.equal(raw?.model, "gpt-5.6-luna");
+  assert.equal(raw?.effort, "max");
+  assert.equal(raw?.policyViolation, undefined);
+
+  const matching = resolveLocalAgentTarget(
+    "codex",
+    profiles,
+    "gpt-5.6-luna",
+    "max",
+    strictDefaults,
+  );
+  assert.equal(matching?.policyViolation, undefined);
+
+  const modelMismatch = resolveLocalAgentTarget(
+    "codex",
+    profiles,
+    "gpt-5.6-sol",
+    "max",
+    strictDefaults,
+  );
+  assert.deepEqual(modelMismatch?.policyViolation, {
+    field: "model",
+    configured: "gpt-5.6-luna",
+    requested: "gpt-5.6-sol",
+  });
+
+  const profileMismatch = resolveLocalAgentTarget(
+    "reviewer",
+    profiles,
+    undefined,
+    undefined,
+    strictDefaults,
+  );
+  assert.deepEqual(profileMismatch?.policyViolation, {
+    field: "model",
+    configured: "gpt-5.6-luna",
+    requested: "gpt-5-codex",
+  });
+}
+
+{
   const target = resolveLocalAgentTarget("claude", profiles);
   assert.equal(target?.kind, "profile");
   assert.equal(target?.provider, "opencode");

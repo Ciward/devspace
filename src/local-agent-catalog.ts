@@ -1,4 +1,4 @@
-import type { SubagentsConfig } from "./local-agent-config.js";
+import { resolveSubagentSelection, type SubagentsConfig } from "./local-agent-config.js";
 import type { LocalAgentProviderAvailability } from "./local-agent-availability.js";
 import {
   LOCAL_AGENT_PROVIDERS,
@@ -14,6 +14,7 @@ export interface LocalAgentProviderStatus {
   usable: boolean;
   model?: string;
   effort?: string;
+  allowOverrides?: boolean;
   reason?: string;
   note?: string;
 }
@@ -40,6 +41,7 @@ export function buildLocalAgentProviderStatuses(
       usable: config.enabled && enabled && available,
       model: configured?.model,
       effort: configured?.effort,
+      allowOverrides: configured?.allowOverrides,
       reason: live?.reason,
       note: live?.note,
     };
@@ -59,15 +61,27 @@ export function buildLocalAgentCatalog(
     enabled: config.enabled,
     providers: visibleProviders,
     profiles: profiles
-      .filter((profile) => !profile.disabled && usable.has(profile.provider))
+      .filter((profile) => {
+        if (profile.disabled || !usable.has(profile.provider)) return false;
+        const provider = config.providers.find((entry) => entry.id === profile.provider);
+        return resolveSubagentSelection(provider, {
+          profileModel: profile.model,
+          profileEffort: profile.effort,
+        }).policyViolation === undefined;
+      })
       .map((profile) => {
         const provider = usable.get(profile.provider)!;
+        const configured = config.providers.find((entry) => entry.id === profile.provider);
+        const selection = resolveSubagentSelection(configured, {
+          profileModel: profile.model,
+          profileEffort: profile.effort,
+        });
         return {
           name: profile.name,
           description: profile.description,
           provider: profile.provider,
-          model: profile.model ?? provider.model,
-          effort: profile.effort ?? provider.effort,
+          model: selection.model ?? provider.model,
+          effort: selection.effort ?? provider.effort,
         };
       }),
   };

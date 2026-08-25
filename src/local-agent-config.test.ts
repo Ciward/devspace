@@ -52,3 +52,35 @@ assert.throws(
   }, {}),
   /Too small/,
 );
+
+const strict = resolveSubagentsConfig({
+  enabled: true,
+  providers: [{
+    id: "codex",
+    enabled: true,
+    model: "gpt-5.6-luna",
+    effort: "max",
+    allowOverrides: false,
+  }],
+}, {});
+assert.deepEqual(strict.providers[0], {
+  id: "codex",
+  enabled: true,
+  model: "gpt-5.6-luna",
+  effort: "max",
+  allowOverrides: false,
+});
+assert.throws(
+  () => resolveSubagentsConfig({
+    enabled: true,
+    providers: [{ id: "codex", enabled: true, effort: "max", allowOverrides: false }],
+  }, {}),
+  /model.*required/i,
+);
+assert.throws(
+  () => resolveSubagentsConfig({
+    enabled: true,
+    providers: [{ id: "codex", enabled: true, model: "gpt-5.6-luna", allowOverrides: false }],
+  }, {}),
+  /effort.*required/i,
+);

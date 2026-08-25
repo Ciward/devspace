@@ -123,6 +123,10 @@ DevSpace passes this through to providers that expose a matching control:
 - `cursor` and `copilot`: ACP thought-level config when supported.
 - `grok`: `--reasoning-effort` on startup and xAI's ACP model metadata for resumed sessions.
 
+Provider policy can lock both `model` and `effort` with
+`allowOverrides: false` in `~/.devspace/config.json`. A profile whose values do
+not match that fixed provider selection is not exposed and cannot be launched.
+
 ### `disabled`
 
 Optional boolean. Disabled profiles are not exposed.

@@ -4,7 +4,8 @@ const policy = await import("./web-only-policy.js").catch(() => undefined);
 
 assert.ok(policy, "web-only policy module must exist");
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /web-hosted ChatGPT or Claude/i);
-assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /must not consume local agent tokens or quotas/i);
+assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /configured `devspace agents` commands/i);
+assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /provider, model, and effort policy/i);
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /ChatGPT Web \+ DevSpace/);
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /Claude Web \+ DevSpace/);
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /git add, commit, push/i);
@@ -14,7 +15,8 @@ for (const command of [
   'codex exec "fix the tests"',
   "/opt/homebrew/bin/claude -p 'review this project'",
   "env FOO=bar opencode run",
-  "devspace agents run codex 'implement this'",
+  "devspace agents daemon status",
+  "devspace agents delete agt_123",
   "npx @openai/codex exec",
   "npx @openai/codex@latest exec",
   "npx codex exec",
@@ -42,6 +44,11 @@ for (const command of [
   'rg -n "codex|claude" src',
   "npx tsc --noEmit",
   "node scripts/check-agent-profile.mjs",
+  "devspace agents targets --json",
+  "devspace agents ls --json",
+  "devspace agents run codex 'implement this' --json",
+  "devspace agents continue agt_123 'finish this' --json",
+  "devspace agents show agt_123 --json",
 ]) {
   assert.equal(
     policy.findWebOnlyCommandViolation(command),

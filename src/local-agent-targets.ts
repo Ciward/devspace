@@ -4,7 +4,11 @@ import {
   type LocalAgentProfile,
   type LocalAgentProvider,
 } from "./local-agent-profiles.js";
-import type { SubagentProviderConfig } from "./local-agent-config.js";
+import {
+  resolveSubagentSelection,
+  type SubagentPolicyViolation,
+  type SubagentProviderConfig,
+} from "./local-agent-config.js";
 
 export interface ParsedLocalAgentRunArgs {
   target: string;
@@ -27,6 +31,7 @@ export type LocalAgentTarget =
       provider: LocalAgentProvider;
       model?: string;
       effort?: string;
+      policyViolation?: SubagentPolicyViolation;
       profile: LocalAgentProfile;
     }
   | {
@@ -35,6 +40,7 @@ export type LocalAgentTarget =
       provider: LocalAgentProvider;
       model?: string;
       effort?: string;
+      policyViolation?: SubagentPolicyViolation;
     };
 
 export function parseLocalAgentRunArgs(args: string[]): ParsedLocalAgentRunArgs {
@@ -133,24 +139,33 @@ export function resolveLocalAgentTarget(
   const profile = profiles.find((candidate) => candidate.name === target);
   if (profile) {
     const providerConfig = providerConfigs.find((entry) => entry.id === profile.provider);
+    const selection = resolveSubagentSelection(providerConfig, {
+      profileModel: profile.model,
+      profileEffort: profile.effort,
+      modelOverride,
+      effortOverride,
+    });
     return {
       kind: "profile",
       name: profile.name,
       provider: profile.provider,
-      model: modelOverride ?? profile.model ?? providerConfig?.model,
-      effort: effortOverride ?? profile.effort ?? providerConfig?.effort,
+      model: selection.model,
+      effort: selection.effort,
+      policyViolation: selection.policyViolation,
       profile,
     };
   }
 
   if (isLocalAgentProvider(target)) {
     const providerConfig = providerConfigs.find((entry) => entry.id === target);
+    const selection = resolveSubagentSelection(providerConfig, { modelOverride, effortOverride });
     return {
       kind: "provider",
       name: target,
       provider: target,
-      model: modelOverride ?? providerConfig?.model,
-      effort: effortOverride ?? providerConfig?.effort,
+      model: selection.model,
+      effort: selection.effort,
+      policyViolation: selection.policyViolation,
     };
   }
 

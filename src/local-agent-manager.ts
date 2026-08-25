@@ -33,6 +33,9 @@ import { LocalAgentRuntimePool } from "./local-agent-runtime-pool.js";
 import { assertAllowedPath } from "./roots.js";
 import {
   isSubagentProviderEnabled,
+  resolveSubagentSelection,
+  subagentProviderConfig,
+  type SubagentPolicyViolation,
   type SubagentsConfig,
 } from "./local-agent-config.js";
 
@@ -130,6 +133,14 @@ export class LocalAgentManager {
           message: `Unknown subagent profile or provider: ${input.target}.`,
         }));
       }
+      if (target.policyViolation) {
+        return Result.err(manager.policyViolationError(
+          target.name,
+          target.provider,
+          target.policyViolation,
+          "start",
+        ));
+      }
       if (target.kind === "profile" && target.profile.disabled) {
         return Result.err(new AgentTargetError({
           code: "PROVIDER_DISABLED",
@@ -170,10 +181,21 @@ export class LocalAgentManager {
       if (!record) return Result.err(agentNotFound(agentId));
       yield* manager.agentWorkspaceResult(record, scope, "continue");
       const profiles = yield* Result.await(manager.loadProfilesResult(record.workspaceRoot, record.profileName));
-      yield* manager.profileForRecordResult(record, profiles);
+      const profile = yield* manager.profileForRecordResult(record, profiles);
       yield* manager.providerEnabledResult(record.provider, record.profileName, "continue");
       yield* manager.driverResult(record.provider, "continue", agentId);
-      return manager.begin(record, prompt, overrides, scope.workspaceId);
+      const selection = yield* manager.selectionResult(
+        record.provider,
+        record.profileName,
+        profile,
+        overrides,
+        "continue",
+      );
+      return manager.begin(record, prompt, {
+        ...overrides,
+        model: selection.model,
+        effort: selection.effort,
+      }, scope.workspaceId);
     });
   }
 
@@ -418,15 +440,75 @@ export class LocalAgentManager {
     }
     const body = profile?.body.trim();
     const fullPrompt = body ? `${body}\n\nTask:\n${prompt}` : prompt;
+    const selection = this.selectionResult(
+      record.provider,
+      record.profileName,
+      profile,
+      { model: record.model, effort: record.effort },
+      "run",
+    );
+    if (selection.isErr()) return selection;
     return Result.ok({
       prompt: fullPrompt,
       workspaceRoot: record.workspaceRoot,
       providerSessionId: record.providerSessionId,
       writeMode: overrides.writeMode ?? "allowed",
-      model: record.model ?? profile?.model,
-      effort: record.effort ?? profile?.effort,
+      model: selection.value.model,
+      effort: selection.value.effort,
       modelOverrideRequested: overrides.model !== undefined,
       effortOverrideRequested: overrides.effort !== undefined,
+    });
+  }
+
+  private selectionResult(
+    provider: string,
+    target: string,
+    profile: LocalAgentProfile | undefined,
+    overrides: RunOverrides,
+    operation: string,
+  ) {
+    if (!isLocalAgentProvider(provider)) {
+      return Result.err(new AgentTargetError({
+        code: "PROVIDER_NOT_CONFIGURED",
+        target,
+        operation,
+        retryable: false,
+        message: `No local agent driver is configured for provider: ${provider}.`,
+      }));
+    }
+    const selection = resolveSubagentSelection(
+      subagentProviderConfig(this.subagents, provider),
+      {
+        profileModel: profile?.model,
+        profileEffort: profile?.effort,
+        modelOverride: overrides.model,
+        effortOverride: overrides.effort,
+      },
+    );
+    if (selection.policyViolation) {
+      return Result.err(this.policyViolationError(
+        target,
+        provider,
+        selection.policyViolation,
+        operation,
+      ));
+    }
+    return Result.ok(selection);
+  }
+
+  private policyViolationError(
+    target: string,
+    provider: LocalAgentProvider,
+    violation: SubagentPolicyViolation,
+    operation: string,
+  ): AgentTargetError {
+    return new AgentTargetError({
+      code: "TARGET_POLICY_VIOLATION",
+      target,
+      provider,
+      operation,
+      retryable: false,
+      message: `Subagent ${violation.field} is locked to ${violation.configured}; requested ${violation.requested}.`,
     });
   }
 

@@ -14,6 +14,7 @@ export type AgentTargetErrorCode =
   | "AGENT_NOT_FOUND"
   | "PROVIDER_DISABLED"
   | "PROVIDER_NOT_CONFIGURED"
+  | "TARGET_POLICY_VIOLATION"
   | "TARGET_RESOLUTION_FAILED";
 
 export class AgentTargetError extends TaggedError("AgentTargetError")<{
@@ -234,6 +235,7 @@ export function agentErrorFromPayload(payload: {
     case "AGENT_NOT_FOUND":
     case "PROVIDER_DISABLED":
     case "PROVIDER_NOT_CONFIGURED":
+    case "TARGET_POLICY_VIOLATION":
     case "TARGET_RESOLUTION_FAILED":
       return new AgentTargetError({
         code: payload.code,
