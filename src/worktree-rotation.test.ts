@@ -85,13 +85,19 @@ try {
   await git(source, ["worktree", "add", "--detach", unmerged, "HEAD"]);
   await writeFile(join(unmerged, "feature.txt"), "feature\n");
   await git(unmerged, ["add", "."]);
-  await git(unmerged, ["commit", "-m", "Feature"]);
+  await git(unmerged, ["commit", "-m", "Feature"], {
+    GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z",
+    GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z",
+  });
   await assert.rejects(
     () => archiveManagedWorktree(unmerged, "origin", { requireMergedIntoSourceHead: true }),
     /is not merged into source HEAD/,
   );
   const featureHead = (await git(unmerged, ["rev-parse", "HEAD"])).trim();
-  await git(source, ["cherry-pick", featureHead]);
+  await git(source, ["cherry-pick", featureHead], {
+    GIT_COMMITTER_DATE: "2026-01-02T00:00:00Z",
+  });
+  assert.notEqual((await git(source, ["rev-parse", "HEAD"])).trim(), featureHead);
   const completed = await archiveManagedWorktree(
     unmerged,
     "origin",
@@ -121,7 +127,14 @@ function session(path: string, lastUsedAt: string): WorkspaceSession {
   };
 }
 
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd });
+async function git(
+  cwd: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): Promise<string> {
+  const { stdout } = await execFileAsync("git", args, {
+    cwd,
+    env: env ? { ...process.env, ...env } : process.env,
+  });
   return stdout;
 }

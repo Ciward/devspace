@@ -135,9 +135,7 @@ export async function archiveManagedWorktree(
   const sourceRoot = options.sourceRoot ?? dirname(commonDir);
   if (options.requireMergedIntoSourceHead) {
     const sourceHead = (await git(sourceRoot, ["rev-parse", "HEAD"])).trim();
-    try {
-      await git(worktreePath, ["merge-base", "--is-ancestor", head, sourceHead]);
-    } catch {
+    if (!await isMergedIntoSource(worktreePath, head, sourceHead)) {
       throw new Error(
         `worktree HEAD ${head.slice(0, 12)} is not merged into source HEAD ${sourceHead.slice(0, 12)}`,
       );
@@ -156,6 +154,20 @@ export async function archiveManagedWorktree(
   await git(sourceRoot, ["worktree", "prune"]);
 
   return { path: worktreePath, sourceRoot, head, archiveRemote, archiveRef };
+}
+
+async function isMergedIntoSource(
+  worktreePath: string,
+  head: string,
+  sourceHead: string,
+): Promise<boolean> {
+  try {
+    await git(worktreePath, ["merge-base", "--is-ancestor", head, sourceHead]);
+    return true;
+  } catch {
+    const cherry = (await git(worktreePath, ["cherry", sourceHead, head])).trim();
+    return cherry.length > 0 && cherry.split("\n").every((line) => line.startsWith("- "));
+  }
 }
 
 function buildArchiveRef(sourceRoot: string, worktreePath: string, head: string): string {
