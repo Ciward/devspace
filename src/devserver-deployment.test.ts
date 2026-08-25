@@ -13,6 +13,10 @@ const codexBootstrap = await readFile(
   new URL("../deploy/devserver/codex-bootstrap.sh", import.meta.url),
   "utf8",
 );
+const codexConfig = await readFile(
+  new URL("../deploy/devserver/configure-tokenlab-codex.sh", import.meta.url),
+  "utf8",
+);
 
 const scriptsCopy = dockerfile.indexOf("COPY scripts ./scripts");
 const npmCi = dockerfile.indexOf("RUN npm ci");
@@ -40,6 +44,11 @@ assert.match(dockerfile, /codex-bootstrap\.sh/);
 assert.match(codexBootstrap, /npm view @openai\/codex version/);
 assert.match(codexBootstrap, /app-server --help/);
 assert.match(codexBootstrap, /CODEX_COMMAND/);
+assert.match(codexConfig, /name = '.*' AND status = 'active'/);
+assert.match(codexConfig, /model = "gpt-5\.6-luna"/);
+assert.match(codexConfig, /model_reasoning_effort = "max"/);
+assert.match(codexConfig, /base_url = "https:\/\/api\.tokenlab\.cc\.cd"/);
+assert.doesNotMatch(codexConfig, /sk-[A-Za-z0-9_-]{8,}/);
 
 for (const tool of ["gh", "shellcheck", "tmux", "zsh", "rust-toolchain", "pnpm@10.23.0", "yarn@1.22.22"]) {
   assert.match(dockerfile, new RegExp(tool), `DevServer image should include ${tool}`);

@@ -64,6 +64,16 @@ file may contain an empty JSON object because Compose supplies the runtime
 settings. The auth file must contain a freshly generated `ownerToken` and must
 never be committed, printed in logs, or copied into the Compose environment.
 
+Configure Codex with an existing active TokenLab API key by name, entirely on
+the OVH server:
+
+```bash
+deploy/devserver/configure-tokenlab-codex.sh devserver
+```
+
+The script requires exactly one matching active, unexpired key, writes only to
+the persistent DevServer home with mode `0600`, and never prints the key.
+
 The current GitHub CLI login is persisted in
 `/home/ubuntu/.devserver/home/.config/gh/hosts.yml` with mode `0600`. GitHub
 operations use HTTPS through `gh auth git-credential`. Revoke it with
