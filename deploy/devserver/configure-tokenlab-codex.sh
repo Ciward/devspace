@@ -44,23 +44,41 @@ auth_tmp="$(mktemp "${CODEX_DIR}/.auth.json.XXXXXX")"
 trap 'rm -f "$config_tmp" "$auth_tmp"' EXIT
 
 {
-  printf 'model = "gpt-5.6-luna"\n'
-  printf 'model_reasoning_effort = "max"\n'
-  printf 'model_provider = "TokenLab"\n'
+  printf 'model = "gpt-5.6-sol"\n'
+  printf 'model_reasoning_effort = "xhigh"\n'
+  printf 'model_context_window = 1000000\n'
+  printf 'model_auto_compact_token_limit = 900000\n'
+  printf 'model_provider = "OpenAI"\n'
   printf 'network_access = "enabled"\n'
   printf 'approval_policy = "never"\n'
   printf 'sandbox_mode = "danger-full-access"\n'
+  printf 'approvals_reviewer = "user"\n'
+  printf 'service_tier = "default"\n'
   printf 'disable_response_storage = true\n'
   printf 'check_for_update_on_startup = false\n'
   printf 'experimental_bearer_token = "%s"\n\n' "$api_key"
-  printf '[model_providers.TokenLab]\n'
-  printf 'name = "TokenLab"\n'
+  printf '[analytics]\n'
+  printf 'enabled = false\n\n'
+  printf '[model_providers.OpenAI]\n'
+  printf 'name = "OpenAI"\n'
   printf 'requires_openai_auth = true\n'
   printf 'wire_api = "responses"\n'
   printf 'base_url = "https://api.tokenlab.cc.cd"\n'
   printf 'experimental_bearer_token = "%s"\n\n' "$api_key"
+  printf '[orchestrator]\n'
+  printf 'default_subagent_model = "gpt-5.6-luna"\n'
+  printf 'default_subagent_reasoning_effort = "max"\n\n'
+  printf '[agents]\n'
+  printf 'max_concurrent_threads_per_session = 6\n\n'
   printf '[features]\n'
+  printf 'hooks = true\n'
+  printf 'memories = true\n'
   printf 'remote_compaction_v2 = true\n'
+  printf 'goals = true\n'
+  printf 'js_repl = false\n'
+  printf 'chronicle = true\n\n'
+  printf '[projects."/home/ubuntu/work"]\n'
+  printf 'trust_level = "trusted"\n'
 } > "$config_tmp"
 
 printf '{\n  "OPENAI_API_KEY": null\n}\n' > "$auth_tmp"

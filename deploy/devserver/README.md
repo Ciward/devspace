@@ -78,7 +78,14 @@ deploy/devserver/configure-tokenlab-codex.sh devserver
 ```
 
 The script requires exactly one matching active, unexpired key, writes only to
-the persistent DevServer home with mode `0600`, and never prints the key.
+the persistent DevServer home with mode `0600`, and never prints the key. Its
+portable Codex defaults mirror the Mac: `gpt-5.6-sol` with `xhigh` reasoning,
+a 1,000,000-token declared context window, a 900,000-token auto-compact limit,
+the same non-interactive execution policy, six concurrent agent threads, and a
+trusted workspace parent. Mac-only notification commands, plugin cache paths,
+and macOS project paths are intentionally omitted. DevSpace still passes its
+strict `gpt-5.6-luna` / `max` selection explicitly for every bounded subagent
+thread and turn.
 
 The current GitHub CLI login is persisted in
 `/home/ubuntu/.devserver/home/.config/gh/hosts.yml` with mode `0600`. GitHub
