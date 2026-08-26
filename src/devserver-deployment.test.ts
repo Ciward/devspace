@@ -36,18 +36,30 @@ assert.ok(
   "Compose must preserve the server and container workspace path",
 );
 assert.match(compose, /DEVSPACE_SUBAGENTS:\s*"1"/);
+assert.match(compose, /seccomp=unconfined/);
+assert.match(compose, /apparmor=unconfined/);
+for (const capability of ["SYS_ADMIN", "SYS_CHROOT", "SETUID", "SETGID", "SYS_PTRACE", "NET_ADMIN"]) {
+  assert.match(compose, new RegExp(capability), `DevServer should grant ${capability} for nested bubblewrap`);
+}
 assert.doesNotMatch(compose, /docker\.sock/);
 
 assert.match(dockerfile, /@openai\/codex@0\.149\.1/);
+assert.match(dockerfile, /bubblewrap/);
+assert.match(dockerfile, /chmod u\+s \/usr\/bin\/bwrap/);
 assert.match(dockerfile, /COPY --chmod=0755 deploy\/devserver\/codex-bootstrap\.sh/);
+assert.match(dockerfile, /ln -s \/opt\/devspace\/dist\/cli\.js \/usr\/local\/bin\/devspace/);
 assert.match(dockerfile, /codex-bootstrap\.sh/);
 assert.match(codexBootstrap, /npm view @openai\/codex version/);
 assert.match(codexBootstrap, /app-server --help/);
 assert.match(codexBootstrap, /CODEX_COMMAND/);
+assert.match(codexBootstrap, /agentd\.lock/);
+assert.match(codexBootstrap, /agentd\.pid/);
+assert.match(codexBootstrap, /agentd\.sock/);
 assert.match(codexConfig, /name = '.*' AND status = 'active'/);
 assert.match(codexConfig, /model = "gpt-5\.6-luna"/);
 assert.match(codexConfig, /model_reasoning_effort = "max"/);
 assert.match(codexConfig, /base_url = "https:\/\/api\.tokenlab\.cc\.cd"/);
+assert.doesNotMatch(codexConfig, /use_legacy_landlock/);
 assert.doesNotMatch(codexConfig, /sk-[A-Za-z0-9_-]{8,}/);
 
 for (const tool of ["gh", "shellcheck", "tmux", "zsh", "rust-toolchain", "pnpm@10.23.0", "yarn@1.22.22"]) {

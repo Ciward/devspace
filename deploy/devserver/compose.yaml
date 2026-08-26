@@ -46,8 +46,16 @@ services:
       - /run:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=0755
     cap_drop:
       - ALL
+    cap_add:
+      - SYS_ADMIN
+      - SYS_CHROOT
+      - SETUID
+      - SETGID
+      - SYS_PTRACE
+      - NET_ADMIN
     security_opt:
-      - no-new-privileges:true
+      - seccomp=unconfined
+      - apparmor=unconfined
     cpus: 4.0
     mem_limit: 8g
     memswap_limit: 12g

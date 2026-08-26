@@ -1,5 +1,7 @@
 import { basename } from "node:path";
 
+export const WEB_ONLY_SHELL_AGENT_POLICY = "Direct local agent CLIs such as Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent, Copilot CLI, and OMX orchestration are blocked by the web-only policy. Bounded subagent delegation is explicitly allowed through configured `devspace agents targets`, `devspace agents ls`, `devspace agents run`, `devspace agents continue`, and `devspace agents show` commands when subagents are enabled. Do not reject those allowed `devspace agents` commands as local-agent execution.";
+
 export const WEB_ONLY_POLICY_INSTRUCTIONS = [
   "STRICT WEB-ONLY EXECUTION POLICY:",
   "You are the web-hosted ChatGPT or Claude model connected through DevSpace.",

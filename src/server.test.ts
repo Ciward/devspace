@@ -19,6 +19,22 @@ import { WorkspaceRegistry } from "./workspaces.js";
 
 const execFileAsync = promisify(execFile);
 
+test("bash tool description explicitly allows configured DevSpace subagents", async (t) => {
+  const context = await fixture(t, {
+    localAgentProviders: [{ name: "codex", available: true }],
+  });
+  const tools = await context.client.listTools();
+  const bashTool = tools.tools.find((tool) => tool.name === "bash");
+  assert.ok(bashTool?.description);
+  assert.match(bashTool.description, /Direct local agent CLIs.*blocked by the web-only policy/i);
+  assert.match(bashTool.description, /`devspace agents run`/);
+  assert.match(bashTool.description, /Do not reject those allowed `devspace agents` commands/i);
+  assert.doesNotMatch(
+    bashTool.description,
+    /Local agent and subagent commands are blocked by the web-only policy/i,
+  );
+});
+
 test("open_workspace keeps lifecycle flags out of model output and preserves complete card metadata", async (t) => {
   const providerNote = "available";
   const context = await fixture(t, {

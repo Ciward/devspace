@@ -10,6 +10,9 @@ assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /ChatGPT Web \+ DevSpace/);
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /Claude Web \+ DevSpace/);
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /git add, commit, push/i);
 assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /never claim.*Git.*inspection-only/i);
+assert.match(policy.WEB_ONLY_SHELL_AGENT_POLICY, /Direct local agent CLIs.*blocked/i);
+assert.match(policy.WEB_ONLY_SHELL_AGENT_POLICY, /`devspace agents run`/);
+assert.match(policy.WEB_ONLY_SHELL_AGENT_POLICY, /Do not reject those allowed `devspace agents` commands/i);
 
 for (const command of [
   'codex exec "fix the tests"',

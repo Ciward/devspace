@@ -18,10 +18,16 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 - Only `/home/ubuntu/work` is exposed as an allowed workspace root.
 - Subagent delegation is available only through DevSpace's configured Codex
   provider. The deployed config locks Codex to `gpt-5.6-luna` with `max`
-  reasoning and rejects model or effort overrides.
+  reasoning and rejects model or effort overrides. Codex uses a setuid system
+  `bubblewrap` binary for its nested Linux sandbox. Following OpenAI's container
+  guidance, the DevServer service disables Docker's outer seccomp/AppArmor
+  profiles and grants only the capabilities needed for nested sandbox setup.
 - The container is limited to 4 CPUs, 8 GiB memory, 12 GiB memory plus swap, and
-  4096 PIDs. Its root filesystem is read-only and all Linux capabilities are
-  dropped.
+  4096 PIDs. Its root filesystem is read-only. All Linux capabilities are
+  dropped except `SYS_ADMIN`, `SYS_CHROOT`, `SETUID`, `SETGID`, `SYS_PTRACE`,
+  and `NET_ADMIN`, which are granted to let the nested Codex/bubblewrap sandbox
+  initialize and configure its isolated loopback interface. The
+  Docker socket is still not mounted.
 - The image includes Node 26.3.0/npm 11.16.0, Go 1.26.6, Rust/Cargo 1.94.1,
   GitHub CLI 2.86.0, pnpm 10.23.0, yarn 1.22.22, zsh, tmux, shellcheck,
   GnuPG, PostgreSQL client headers, and Python build headers.

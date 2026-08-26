@@ -14,6 +14,18 @@ log() {
   printf '[devserver-codex] %s\n' "$*" >&2
 }
 
+cleanup_stale_agent_daemon_runtime() {
+  local state_dir="${DEVSPACE_STATE_DIR:-${HOME}/.local/share/devspace}"
+
+  # A local agent daemon cannot survive a DevServer container recreation, but
+  # its runtime lock/socket live in the persistent home volume. Remove only the
+  # transient ownership files so PID reuse cannot make a stale daemon look live.
+  rm -f \
+    "${state_dir}/agentd.lock" \
+    "${state_dir}/agentd.pid" \
+    "${state_dir}/agentd.sock"
+}
+
 run_with_timeout() {
   if command -v timeout >/dev/null 2>&1; then
     timeout "${UPDATE_TIMEOUT_SECONDS}s" "$@"
@@ -76,6 +88,7 @@ install_version() {
   activate_version "$version_dir"
 }
 
+cleanup_stale_agent_daemon_runtime
 mkdir -p "$CODEX_VERSIONS_DIR"
 
 selected=""

@@ -26,6 +26,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       bash \
+      bubblewrap \
       build-essential \
       ca-certificates \
       curl \
@@ -63,6 +64,7 @@ RUN apt-get update \
       zip \
       vim-tiny \
       zsh \
+    && chmod u+s /usr/bin/bwrap \
     && curl -fsSL --retry 3 \
       "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt" \
       -o /tmp/gh_checksums.txt \
@@ -91,6 +93,7 @@ COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/node_modules /opt/devspace
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/dist /opt/devspace/dist
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/skills /opt/devspace/skills
 COPY --chmod=0755 deploy/devserver/codex-bootstrap.sh /opt/devspace/bin/codex-bootstrap.sh
+RUN ln -s /opt/devspace/dist/cli.js /usr/local/bin/devspace
 
 ARG DEVSERVER_VCS_REF=unknown
 
