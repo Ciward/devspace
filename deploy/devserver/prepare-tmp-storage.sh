@@ -3,6 +3,7 @@
 set -euo pipefail
 
 readonly TMP_SIZE_GIB="80"
+readonly MIN_HOST_HEADROOM_GIB="10"
 readonly DEVSERVER_STATE_ROOT="${DEVSERVER_STATE_ROOT:-/home/ubuntu/.devserver}"
 readonly TMP_IMAGE="${DEVSERVER_TMP_IMAGE:-${DEVSERVER_STATE_ROOT}/storage/devserver-tmp-80g.ext4}"
 readonly TMP_MOUNT="${DEVSERVER_TMP_ROOT:-${DEVSERVER_STATE_ROOT}/tmp80}"
@@ -32,6 +33,13 @@ if [[ -e "$TMP_IMAGE" ]]; then
     exit 4
   fi
 else
+  backing_available_bytes="$(df -B1 --output=avail "$(dirname "$TMP_IMAGE")" | tail -n 1 | tr -d ' ')"
+  minimum_available_bytes=$(((TMP_SIZE_GIB + MIN_HOST_HEADROOM_GIB) * 1024 * 1024 * 1024))
+  if [[ "$backing_available_bytes" -lt "$minimum_available_bytes" ]]; then
+    printf 'Not enough host disk space for %sGiB TMP plus %sGiB headroom\n' \
+      "$TMP_SIZE_GIB" "$MIN_HOST_HEADROOM_GIB" >&2
+    exit 6
+  fi
   truncate -s "${TMP_SIZE_GIB}G" "$TMP_IMAGE"
   mkfs.ext4 -F -m 0 -L devserver-tmp "$TMP_IMAGE" >/dev/null
   chmod 0600 "$TMP_IMAGE"
