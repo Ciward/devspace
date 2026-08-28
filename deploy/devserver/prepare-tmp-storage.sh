@@ -3,7 +3,7 @@
 set -euo pipefail
 
 readonly TMP_SIZE_GIB="80"
-readonly MIN_HOST_HEADROOM_GIB="10"
+readonly MIN_HOST_HEADROOM_GIB="8"
 readonly DEVSERVER_STATE_ROOT="${DEVSERVER_STATE_ROOT:-/home/ubuntu/.devserver}"
 readonly TMP_IMAGE="${DEVSERVER_TMP_IMAGE:-${DEVSERVER_STATE_ROOT}/storage/devserver-tmp-80g.ext4}"
 readonly TMP_MOUNT="${DEVSERVER_TMP_ROOT:-${DEVSERVER_STATE_ROOT}/tmp80}"
