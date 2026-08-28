@@ -35,6 +35,22 @@ prepare_runtime_directories() {
   chmod 0700 "$runtime_dir"
 }
 
+ensure_login_shell_path() {
+  local marker="# DevServer managed toolchain path"
+  local profile
+  local path_line="export PATH=\"/usr/local/cargo/bin:/usr/local/go/bin:\$HOME/.local/bin:\$HOME/.npm-global/current/bin:\$PATH\""
+
+  for profile in "${HOME}/.profile" "${HOME}/.bash_profile" "${HOME}/.zprofile"; do
+    if grep -Fq "$marker" "$profile" 2>/dev/null; then
+      continue
+    fi
+    if [[ -s "$profile" ]]; then
+      printf '\n' >> "$profile"
+    fi
+    printf '%s\n%s\n' "$marker" "$path_line" >> "$profile"
+  done
+}
+
 run_with_timeout() {
   if command -v timeout >/dev/null 2>&1; then
     timeout "${UPDATE_TIMEOUT_SECONDS}s" "$@"
@@ -99,6 +115,7 @@ install_version() {
 
 cleanup_stale_agent_daemon_runtime
 prepare_runtime_directories
+ensure_login_shell_path
 mkdir -p "$CODEX_VERSIONS_DIR"
 
 selected=""
