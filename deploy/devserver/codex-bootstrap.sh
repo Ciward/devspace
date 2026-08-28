@@ -27,11 +27,12 @@ cleanup_stale_agent_daemon_runtime() {
 }
 
 prepare_runtime_directories() {
-  local build_tmp="${TMPDIR:-${HOME}/.cache/devspace/tmp}"
+  local build_tmp="${TMPDIR:-/tmp}"
   local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
   mkdir -p "$build_tmp" "$runtime_dir"
-  chmod 0700 "$build_tmp" "$runtime_dir"
+  chmod 01777 "$build_tmp"
+  chmod 0700 "$runtime_dir"
 }
 
 run_with_timeout() {

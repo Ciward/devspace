@@ -14,8 +14,8 @@ services:
     environment:
       HOME: /home/ubuntu
       TZ: Asia/Shanghai
-      TMPDIR: /home/ubuntu/.cache/devspace/tmp
-      GOTMPDIR: /home/ubuntu/.cache/devspace/tmp
+      TMPDIR: /tmp
+      GOTMPDIR: /tmp
       XDG_CACHE_HOME: /home/ubuntu/.cache
       XDG_RUNTIME_DIR: /run/user/1000
       CHROME_PATH: /usr/bin/chromium
@@ -42,13 +42,13 @@ services:
     volumes:
       - ${DEVSERVER_HOME:-/home/ubuntu/.devserver/home}:/home/ubuntu
       - ${DEVSERVER_WORK_ROOT:-/home/ubuntu/work}:/home/ubuntu/work
+      - ${DEVSERVER_TMP_ROOT:-/home/ubuntu/.devserver/tmp80}:/tmp
     ports:
       - 127.0.0.1:17676:7676
     networks:
       - edge
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=2g,uid=1000,gid=1000,mode=1777
       - /run:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=0755
     cap_drop:
       - ALL

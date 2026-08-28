@@ -17,6 +17,10 @@ const codexConfig = await readFile(
   new URL("../deploy/devserver/configure-tokenlab-codex.sh", import.meta.url),
   "utf8",
 );
+const tmpStorage = await readFile(
+  new URL("../deploy/devserver/prepare-tmp-storage.sh", import.meta.url),
+  "utf8",
+);
 
 const scriptsCopy = dockerfile.indexOf("COPY scripts ./scripts");
 const npmCi = dockerfile.indexOf("RUN npm ci");
@@ -37,8 +41,13 @@ assert.ok(
 );
 assert.match(compose, /DEVSPACE_SUBAGENTS:\s*"1"/);
 assert.match(compose, /DEVSPACE_TOOL_MODE:\s*codex/);
-assert.match(compose, /TMPDIR:\s*\/home\/ubuntu\/\.cache\/devspace\/tmp/);
-assert.match(compose, /GOTMPDIR:\s*\/home\/ubuntu\/\.cache\/devspace\/tmp/);
+assert.match(compose, /TMPDIR:\s*\/tmp/);
+assert.match(compose, /GOTMPDIR:\s*\/tmp/);
+assert.ok(
+  compose.includes("${DEVSERVER_TMP_ROOT:-/home/ubuntu/.devserver/tmp80}:/tmp"),
+  "Compose must mount the dedicated 80 GiB disk-backed filesystem at /tmp",
+);
+assert.doesNotMatch(compose, /\/tmp:rw,noexec,nosuid,size=2g/);
 assert.match(compose, /CHROME_PATH:\s*\/usr\/bin\/chromium/);
 assert.match(compose, /TZ:\s*Asia\/Shanghai/);
 assert.match(compose, /seccomp=unconfined/);
@@ -62,7 +71,12 @@ assert.match(codexBootstrap, /CODEX_COMMAND/);
 assert.match(codexBootstrap, /agentd\.lock/);
 assert.match(codexBootstrap, /agentd\.pid/);
 assert.match(codexBootstrap, /agentd\.sock/);
-assert.match(codexBootstrap, /\.cache\/devspace\/tmp/);
+assert.match(codexBootstrap, /chmod 01777/);
+assert.match(tmpStorage, /TMP_SIZE_GIB="80"/);
+assert.match(tmpStorage, /truncate -s "\$\{TMP_SIZE_GIB\}G"/);
+assert.match(tmpStorage, /mkfs\.ext4/);
+assert.match(tmpStorage, /loop,nofail,nodev,nosuid/);
+assert.match(tmpStorage, /chmod 01777/);
 assert.match(codexConfig, /name = '.*' AND status = 'active'/);
 assert.match(codexConfig, /model = "gpt-5\.6-sol"/);
 assert.match(codexConfig, /model_reasoning_effort = "xhigh"/);

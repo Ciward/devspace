@@ -46,7 +46,7 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 /home/ubuntu/.devserver/cloudflared tunnel config and credentials
 /home/ubuntu/.devserver/home/.config/gh/ GitHub CLI state
 /home/ubuntu/.devserver/home/.venvs/  persistent Python environments
-/home/ubuntu/.devserver/home/.cache/devspace/tmp/ executable build temp space
+/home/ubuntu/.devserver/tmp80/      dedicated 80 GiB filesystem mounted at /tmp
 ```
 
 The public connector URL is `https://devserver.ciward.dpdns.org/mcp`. A dedicated
@@ -57,8 +57,9 @@ diagnostic probes.
 DevServer uses the Codex-compatible DevSpace tool surface. Shell commands return
 a process session after a short yield instead of holding one MCP request open
 for multi-minute tests or builds; the host continues them through `write_stdin`.
-Build tools use the persistent executable temp directory under the DevServer
-home. `/tmp` remains a bounded `noexec` tmpfs for untrusted transient files.
+`/tmp` is a dedicated, disk-backed 80 GiB ext4 filesystem with normal sticky
+directory permissions and executable build output. It is separate from the
+container root filesystem and supports Go linking, Node builds, and Chromium.
 
 ## Operations
 
@@ -77,6 +78,17 @@ Before the first start, create both
 file may contain an empty JSON object because Compose supplies the runtime
 settings. The auth file must contain a freshly generated `ownerToken` and must
 never be committed, printed in logs, or copied into the Compose environment.
+
+Prepare the dedicated `/tmp` filesystem once on the server before starting or
+upgrading DevServer:
+
+```bash
+sudo deploy/devserver/prepare-tmp-storage.sh
+```
+
+The script creates a sparse 80 GiB ext4 image under
+`/home/ubuntu/.devserver/storage`, adds an idempotent loop mount to `/etc/fstab`,
+mounts it at `/home/ubuntu/.devserver/tmp80`, and enforces mode `1777`.
 
 Configure Codex with an existing active TokenLab API key by name, entirely on
 the OVH server:
