@@ -36,6 +36,11 @@ assert.ok(
   "Compose must preserve the server and container workspace path",
 );
 assert.match(compose, /DEVSPACE_SUBAGENTS:\s*"1"/);
+assert.match(compose, /DEVSPACE_TOOL_MODE:\s*codex/);
+assert.match(compose, /TMPDIR:\s*\/home\/ubuntu\/\.cache\/devspace\/tmp/);
+assert.match(compose, /GOTMPDIR:\s*\/home\/ubuntu\/\.cache\/devspace\/tmp/);
+assert.match(compose, /CHROME_PATH:\s*\/usr\/bin\/chromium/);
+assert.match(compose, /TZ:\s*Asia\/Shanghai/);
 assert.match(compose, /seccomp=unconfined/);
 assert.match(compose, /apparmor=unconfined/);
 for (const capability of ["SYS_ADMIN", "SYS_CHROOT", "SETUID", "SETGID", "SYS_PTRACE", "NET_ADMIN"]) {
@@ -45,6 +50,8 @@ assert.doesNotMatch(compose, /docker\.sock/);
 
 assert.match(dockerfile, /@openai\/codex@0\.149\.1/);
 assert.match(dockerfile, /bubblewrap/);
+assert.match(dockerfile, /chromium/);
+assert.match(dockerfile, /fonts-noto-cjk/);
 assert.match(dockerfile, /chmod u\+s \/usr\/bin\/bwrap/);
 assert.match(dockerfile, /COPY --chmod=0755 deploy\/devserver\/codex-bootstrap\.sh/);
 assert.match(dockerfile, /ln -s \/opt\/devspace\/dist\/cli\.js \/usr\/local\/bin\/devspace/);
@@ -55,6 +62,7 @@ assert.match(codexBootstrap, /CODEX_COMMAND/);
 assert.match(codexBootstrap, /agentd\.lock/);
 assert.match(codexBootstrap, /agentd\.pid/);
 assert.match(codexBootstrap, /agentd\.sock/);
+assert.match(codexBootstrap, /\.cache\/devspace\/tmp/);
 assert.match(codexConfig, /name = '.*' AND status = 'active'/);
 assert.match(codexConfig, /model = "gpt-5\.6-sol"/);
 assert.match(codexConfig, /model_reasoning_effort = "xhigh"/);

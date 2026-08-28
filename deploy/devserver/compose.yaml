@@ -13,6 +13,12 @@ services:
     user: "1000:1000"
     environment:
       HOME: /home/ubuntu
+      TZ: Asia/Shanghai
+      TMPDIR: /home/ubuntu/.cache/devspace/tmp
+      GOTMPDIR: /home/ubuntu/.cache/devspace/tmp
+      XDG_CACHE_HOME: /home/ubuntu/.cache
+      XDG_RUNTIME_DIR: /run/user/1000
+      CHROME_PATH: /usr/bin/chromium
       HOST: 0.0.0.0
       PORT: 7676
       DEVSPACE_CONFIG_DIR: /home/ubuntu/.devspace
@@ -23,7 +29,7 @@ services:
       DEVSPACE_WORKTREE_ARCHIVE_REMOTE: origin
       DEVSPACE_PUBLIC_BASE_URL: ${DEVSERVER_PUBLIC_BASE_URL:-https://devserver.ciward.dpdns.org}
       DEVSPACE_ALLOWED_HOSTS: localhost,127.0.0.1,::1,devserver,devserver.ciward.dpdns.org
-      DEVSPACE_TOOL_MODE: full
+      DEVSPACE_TOOL_MODE: codex
       DEVSPACE_WIDGETS: changes
       DEVSPACE_SKILLS: "1"
       DEVSPACE_SUBAGENTS: "1"

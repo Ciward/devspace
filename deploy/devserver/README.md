@@ -29,8 +29,9 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
   initialize and configure its isolated loopback interface. The
   Docker socket is still not mounted.
 - The image includes Node 26.3.0/npm 11.16.0, Go 1.26.6, Rust/Cargo 1.94.1,
-  GitHub CLI 2.86.0, pnpm 10.23.0, yarn 1.22.22, zsh, tmux, shellcheck,
-  GnuPG, PostgreSQL client headers, and Python build headers.
+  GitHub CLI 2.86.0, pnpm 10.23.0, yarn 1.22.22, Chromium with Noto CJK
+  fonts, zsh, tmux, shellcheck, GnuPG, PostgreSQL client headers, and Python
+  build headers.
 - A persistent Python 3.12.11 environment is available at
   `/home/ubuntu/.venvs/local-python`; it contains the non-secret user packages
   from the Mac's user Python environment. `uv` 0.8.17 manages it.
@@ -45,12 +46,19 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 /home/ubuntu/.devserver/cloudflared tunnel config and credentials
 /home/ubuntu/.devserver/home/.config/gh/ GitHub CLI state
 /home/ubuntu/.devserver/home/.venvs/  persistent Python environments
+/home/ubuntu/.devserver/home/.cache/devspace/tmp/ executable build temp space
 ```
 
 The public connector URL is `https://devserver.ciward.dpdns.org/mcp`. A dedicated
 Cloudflare Tunnel connects directly to the `devserver` container on the private
 Compose network. Port `17676` is published only on server loopback for health and
 diagnostic probes.
+
+DevServer uses the Codex-compatible DevSpace tool surface. Shell commands return
+a process session after a short yield instead of holding one MCP request open
+for multi-minute tests or builds; the host continues them through `write_stdin`.
+Build tools use the persistent executable temp directory under the DevServer
+home. `/tmp` remains a bounded `noexec` tmpfs for untrusted transient files.
 
 ## Operations
 

@@ -29,10 +29,12 @@ RUN apt-get update \
       bubblewrap \
       build-essential \
       ca-certificates \
+      chromium \
       curl \
       file \
       dnsutils \
       fd-find \
+      fonts-noto-cjk \
       git \
       git-lfs \
       gnupg \

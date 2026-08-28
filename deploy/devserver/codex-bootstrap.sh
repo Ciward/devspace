@@ -26,6 +26,14 @@ cleanup_stale_agent_daemon_runtime() {
     "${state_dir}/agentd.sock"
 }
 
+prepare_runtime_directories() {
+  local build_tmp="${TMPDIR:-${HOME}/.cache/devspace/tmp}"
+  local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+  mkdir -p "$build_tmp" "$runtime_dir"
+  chmod 0700 "$build_tmp" "$runtime_dir"
+}
+
 run_with_timeout() {
   if command -v timeout >/dev/null 2>&1; then
     timeout "${UPDATE_TIMEOUT_SECONDS}s" "$@"
@@ -89,6 +97,7 @@ install_version() {
 }
 
 cleanup_stale_agent_daemon_runtime
+prepare_runtime_directories
 mkdir -p "$CODEX_VERSIONS_DIR"
 
 selected=""
