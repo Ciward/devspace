@@ -33,6 +33,39 @@ const manager = new ProcessSessionManager({
   completedSessionTtlMs: 1_000,
 });
 
+await assert.rejects(
+  manager.start({
+    workspaceId: "ws-invalid-timeout",
+    command: "node -e \"setTimeout(() => {}, 5000)\"",
+    cwd: process.cwd(),
+    timeoutMs: 0,
+  }),
+  /at least 1 millisecond/,
+);
+
+{
+  const timeoutManager = new ProcessSessionManager();
+  const started = await timeoutManager.start({
+    workspaceId: "ws-timeout",
+    command: "node -e \"setTimeout(() => {}, 5000)\"",
+    cwd: process.cwd(),
+    yieldTimeMs: 10,
+    timeoutMs: 50,
+  });
+  assert.equal(started.running, true);
+  assert.equal(typeof started.sessionId, "number");
+
+  const completed = await timeoutManager.write({
+    workspaceId: "ws-timeout",
+    sessionId: started.sessionId as number,
+    yieldTimeMs: 1_000,
+  });
+  assert.equal(completed.running, false);
+  assert.equal(completed.timedOut, true);
+  assert.match(completed.output, /timed out/i);
+  timeoutManager.shutdown();
+}
+
 const node = process.platform === "win32"
   ? `"${process.execPath}"`
   : JSON.stringify(process.execPath);

@@ -11,6 +11,7 @@ const DEFAULT_BUFFER_CHARACTERS = 1_000_000;
 const COMPLETED_SESSION_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
+const MAX_PROCESS_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
 
 export interface StartCommandInput {
   workspaceId: string;
@@ -21,6 +22,7 @@ export interface StartCommandInput {
   columns?: number;
   rows?: number;
   yieldTimeMs?: number;
+  timeoutMs?: number;
   maxOutputTokens?: number;
 }
 
@@ -41,6 +43,7 @@ export interface ProcessSnapshot {
   running: boolean;
   exitCode?: number;
   signal?: string;
+  timedOut?: boolean;
   wallTimeMs: number;
 }
 
@@ -61,8 +64,10 @@ interface ProcessSession {
   running: boolean;
   exitCode?: number;
   signal?: string;
+  timedOut?: boolean;
   exitPromise: Promise<void>;
   resolveExit: () => void;
+  timeoutTimer?: NodeJS.Timeout;
   cleanupTimer?: NodeJS.Timeout;
 }
 
@@ -85,6 +90,14 @@ function terminalSize(value: number | undefined, fallback: number): number {
     throw new Error("Terminal dimensions must be integers between 1 and 1000.");
   }
   return value;
+}
+
+function processTimeout(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isFinite(value) || value < 1) {
+    throw new Error("Process timeout must be at least 1 millisecond.");
+  }
+  return Math.min(Math.floor(value), MAX_PROCESS_TIMEOUT_MS);
 }
 
 function processEnvironment(input?: {
@@ -223,12 +236,14 @@ export class ProcessSessionManager {
   }
 
   async start(input: StartCommandInput): Promise<ProcessSnapshot> {
+    const timeoutMs = processTimeout(input.timeoutMs);
     const session = this.createSession(input);
     this.sessions.set(session.id, session);
 
     try {
       if (input.tty && process.platform !== "win32") await this.startPty(session, input);
       else this.startPipe(session, input);
+      this.armTimeout(session, timeoutMs);
     } catch (error) {
       this.sessions.delete(session.id);
       throw error;
@@ -283,6 +298,7 @@ export class ProcessSessionManager {
 
   shutdown(): void {
     for (const session of this.sessions.values()) {
+      if (session.timeoutTimer) clearTimeout(session.timeoutTimer);
       if (session.cleanupTimer) clearTimeout(session.cleanupTimer);
       if (session.running) session.process?.kill("SIGTERM");
     }
@@ -320,6 +336,18 @@ export class ProcessSessionManager {
       exitPromise,
       resolveExit,
     };
+  }
+
+  private armTimeout(session: ProcessSession, timeoutMs: number | undefined): void {
+    if (timeoutMs === undefined) return;
+
+    session.timeoutTimer = setTimeout(() => {
+      if (!session.running) return;
+      session.timedOut = true;
+      this.append(session, `Command timed out after ${timeoutMs} milliseconds.\n`);
+      session.process?.kill("SIGTERM");
+    }, timeoutMs);
+    session.timeoutTimer.unref();
   }
 
   private startPipe(session: ProcessSession, input: StartCommandInput): void {
@@ -386,6 +414,7 @@ export class ProcessSessionManager {
 
   private finish(session: ProcessSession, exitCode?: number, signal?: string): void {
     if (!session.running) return;
+    if (session.timeoutTimer) clearTimeout(session.timeoutTimer);
     session.running = false;
     session.exitCode = exitCode;
     session.signal = signal;
@@ -413,6 +442,7 @@ export class ProcessSessionManager {
       running: session.running,
       exitCode: session.exitCode,
       signal: session.signal,
+      timedOut: session.timedOut,
       wallTimeMs: Date.now() - session.startedAt,
     };
   }

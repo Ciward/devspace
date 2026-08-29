@@ -54,9 +54,13 @@ Cloudflare Tunnel connects directly to the `devserver` container on the private
 Compose network. Port `17676` is published only on server loopback for health and
 diagnostic probes.
 
-DevServer uses the Codex-compatible DevSpace tool surface. Shell commands return
-a process session after a short yield instead of holding one MCP request open
-for multi-minute tests or builds; the host continues them through `write_stdin`.
+DevServer exposes the full DevSpace tool surface, including the legacy
+`write`/`edit`/`grep`/`glob`/`ls`/`bash` names expected by existing ChatGPT
+conversations. `bash` is resumable: it returns a process session after a
+five-second yield instead of holding one MCP request open for multi-minute tests
+or builds, and the host continues it through `write_stdin`. The
+`exec_command`/`write_stdin` pair is also available for hosts that already know
+the Codex-compatible process lifecycle.
 `/tmp` is a dedicated, disk-backed 80 GiB ext4 filesystem with normal sticky
 directory permissions and executable build output. It is separate from the
 container root filesystem and supports Go linking, Node builds, and Chromium.

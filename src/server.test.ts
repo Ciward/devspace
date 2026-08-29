@@ -35,6 +35,75 @@ test("bash tool description explicitly allows configured DevSpace subagents", as
   );
 });
 
+test("full mode can keep legacy tools while bash continues through write_stdin", async (t) => {
+  const context = await fixture(t, { resumableBash: true, resumableBashYieldMs: 10 });
+  const tools = await context.client.listTools();
+  const names = new Set(tools.tools.map((tool) => tool.name));
+  for (const name of [
+    "write",
+    "edit",
+    "grep",
+    "glob",
+    "ls",
+    "bash",
+    "exec_command",
+    "write_stdin",
+  ]) {
+    assert.equal(names.has(name), true, `expected full resumable tool ${name}`);
+  }
+
+  const opened = await callOpen(context.client, context.project, "chat-resumable");
+  const workspaceId = structuredContent(opened).workspaceId as string;
+  const started = await context.client.callTool({
+    name: "bash",
+    arguments: {
+      workspaceId,
+      command: "node -e \"setTimeout(() => process.stdout.write('resumed-ok'), 100)\"",
+      timeout: 2,
+    },
+  });
+  const startedContent = structuredContent(started);
+  assert.equal(startedContent.running, true);
+  assert.equal(typeof startedContent.sessionId, "number");
+  assert.equal((started._meta as Record<string, unknown>).tool, "bash");
+
+  const completed = await context.client.callTool({
+    name: "write_stdin",
+    arguments: {
+      workspaceId,
+      sessionId: startedContent.sessionId,
+      yieldTimeMs: 1_000,
+    },
+  });
+  assert.match(responseText(completed), /resumed-ok/);
+  assert.equal(structuredContent(completed).running, false);
+  assert.equal(structuredContent(completed).exitCode, 0);
+});
+
+test("resumable bash enforces its total process timeout", async (t) => {
+  const context = await fixture(t, { resumableBash: true, resumableBashYieldMs: 10 });
+  const opened = await callOpen(context.client, context.project, "chat-timeout");
+  const workspaceId = structuredContent(opened).workspaceId as string;
+  const started = await context.client.callTool({
+    name: "bash",
+    arguments: {
+      workspaceId,
+      command: "node -e \"setTimeout(() => {}, 5000)\"",
+      timeout: 0.05,
+    },
+  });
+  const sessionId = structuredContent(started).sessionId;
+  assert.equal(typeof sessionId, "number");
+
+  const completed = await context.client.callTool({
+    name: "write_stdin",
+    arguments: { workspaceId, sessionId, yieldTimeMs: 1_000 },
+  });
+  assert.equal(structuredContent(completed).running, false);
+  assert.equal(structuredContent(completed).timedOut, true);
+  assert.match(responseText(completed), /timed out/i);
+});
+
 test("open_workspace keeps lifecycle flags out of model output and preserves complete card metadata", async (t) => {
   const providerNote = "available";
   const context = await fixture(t, {
@@ -263,6 +332,8 @@ async function fixture(
     git?: boolean;
     localAgentProviders?: LocalAgentProviderAvailability[] | (() => LocalAgentProviderAvailability[]);
     subagents?: SubagentsConfig;
+    resumableBash?: boolean;
+    resumableBashYieldMs?: number;
   } = {},
 ): Promise<ServerFixture> {
   const root = await mkdtemp(join(tmpdir(), "devspace-server-test-"));
@@ -302,6 +373,8 @@ async function fixture(
     DEVSPACE_AGENT_DIR: agentDir,
     DEVSPACE_WIDGETS: "full",
     DEVSPACE_TOOL_MODE: "full",
+    DEVSPACE_RESUMABLE_BASH: options.resumableBash ? "1" : "0",
+    DEVSPACE_RESUMABLE_BASH_YIELD_MS: String(options.resumableBashYieldMs ?? 10_000),
     DEVSPACE_SUBAGENTS: options.localAgentProviders ? "1" : "0",
     DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
     PORT: "1",

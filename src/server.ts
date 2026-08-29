@@ -385,8 +385,11 @@ function serverInstructions(config: ServerConfig): string {
     : "";
 
   const agentsMd = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
+  const processInstruction = config.resumableBash
+    ? `Use ${toolNames.shell} for short commands and exec_command for commands expected to run longer than a few seconds. When either returns a sessionId, call write_stdin until the process exits; never rerun the same command merely because it is still running. `
+    : "";
 
-  return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} when no usable workspaceId exists for a project folder or isolated worktree, then keep using that workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted ordinary project-file modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, package scripts, and Git lifecycle commands including add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. Git writes required to complete the requested repository workflow are explicitly allowed; do not claim Git is inspection-only. Outside those Git operations, do not create or modify ordinary project files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
+  return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} when no usable workspaceId exists for a project folder or isolated worktree, then keep using that workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. ${agentsMd}${skills}${inspection}${processInstruction}Prefer ${toolNames.edit} for targeted ordinary project-file modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, package scripts, and Git lifecycle commands including add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. Git writes required to complete the requested repository workflow are explicitly allowed; do not claim Git is inspection-only. Outside those Git operations, do not create or modify ordinary project files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
 }
 
 function formatVisibleAgent(agent: {
@@ -701,8 +704,10 @@ async function assertWorkspaceAppAssets(): Promise<void> {
 
 function processResult(snapshot: ProcessSnapshot): string {
   const status = snapshot.running
-    ? `Process running with session ID ${snapshot.sessionId}.`
-    : snapshot.signal
+    ? `Process running with session ID ${snapshot.sessionId}. Call write_stdin with this workspaceId and sessionId to continue.`
+    : snapshot.timedOut
+      ? "Process timed out."
+      : snapshot.signal
       ? `Process exited after signal ${snapshot.signal}.`
       : `Process exited with code ${snapshot.exitCode ?? "unknown"}.`;
   return snapshot.output ? `${snapshot.output.replace(/\n$/, "")}\n${status}` : status;
@@ -714,13 +719,14 @@ function processOutputSchema(): z.ZodRawShape {
     running: z.boolean(),
     exitCode: z.number().int().optional(),
     signal: z.string().optional(),
+    timedOut: z.boolean().optional(),
     wallTimeMs: z.number().nonnegative(),
     outputTruncated: z.boolean(),
   });
 }
 
 function processToolResponse(
-  tool: "exec_command" | "write_stdin",
+  tool: "bash" | "exec_command" | "write_stdin",
   workspaceId: string,
   snapshot: ProcessSnapshot,
   summary: Record<string, unknown>,
@@ -744,6 +750,7 @@ function processToolResponse(
       running: snapshot.running,
       exitCode: snapshot.exitCode,
       signal: snapshot.signal,
+      timedOut: snapshot.timedOut,
       wallTimeMs: snapshot.wallTimeMs,
       outputTruncated: snapshot.outputTruncated,
     },
@@ -783,6 +790,13 @@ function registerCodexProcessTools(
           .max(30_000)
           .optional()
           .describe("Milliseconds to wait before returning a running session. Defaults to 10000."),
+        timeoutMs: z
+          .number()
+          .int()
+          .min(1_000)
+          .max(3_600_000)
+          .optional()
+          .describe("Maximum total process runtime in milliseconds. Defaults to 300000."),
         maxOutputTokens: z
           .number()
           .int()
@@ -795,7 +809,7 @@ function registerCodexProcessTools(
       ...toolWidgetDescriptorMeta(config, "shell"),
       annotations: SHELL_TOOL_ANNOTATIONS,
     },
-    async ({ workspaceId, cmd, tty, columns, rows, workingDirectory, yieldTimeMs, maxOutputTokens }) => {
+    async ({ workspaceId, cmd, tty, columns, rows, workingDirectory, yieldTimeMs, timeoutMs, maxOutputTokens }) => {
       const startedAt = performance.now();
       const violation = findWebOnlyCommandViolation(cmd);
       if (violation) {
@@ -830,6 +844,7 @@ function registerCodexProcessTools(
         columns,
         rows,
         yieldTimeMs,
+        timeoutMs: timeoutMs ?? 300_000,
         maxOutputTokens,
       });
 
@@ -848,6 +863,7 @@ function registerCodexProcessTools(
         workingDirectory: workingDirectory ?? ".",
         running: snapshot.running,
         exitCode: snapshot.exitCode,
+        timedOut: snapshot.timedOut,
         wallTimeMs: snapshot.wallTimeMs,
       });
     },
@@ -859,10 +875,10 @@ function registerCodexProcessTools(
     {
       title: "Write to process",
       description:
-        "Poll or write characters to a process returned by exec_command. Omit chars or pass an empty string to poll. Pass \\u0003 to send Ctrl-C.",
+        "Poll or write characters to a process returned by bash or exec_command. Omit chars or pass an empty string to poll. Pass \\u0003 to send Ctrl-C.",
       inputSchema: {
         workspaceId: z.string().describe("Workspace identifier used to start the process."),
-        sessionId: z.number().describe("Process session identifier returned by exec_command."),
+        sessionId: z.number().describe("Process session identifier returned by bash or exec_command."),
         chars: z.string().optional().describe("Characters to write. Omit or pass an empty string to poll."),
         columns: z.number().int().min(1).max(1_000).optional().describe("Resize a PTY to this width."),
         rows: z.number().int().min(1).max(1_000).optional().describe("Resize a PTY to this height."),
@@ -910,6 +926,7 @@ function registerCodexProcessTools(
         charactersWritten: chars?.length ?? 0,
         running: snapshot.running,
         exitCode: snapshot.exitCode,
+        timedOut: snapshot.timedOut,
         wallTimeMs: snapshot.wallTimeMs,
       });
     },
@@ -1456,6 +1473,9 @@ export function createMcpServer(
     },
   );
 
+  const resumableBashHint = config.resumableBash
+    ? ` Commands return within ${config.resumableBashYieldMs} milliseconds when still running; call write_stdin with the returned sessionId until completion. The timeout field limits total process runtime rather than the initial HTTP request.`
+    : "";
   if (config.toolMode !== "codex") {
   registerAppTool(
     server,
@@ -1970,8 +1990,8 @@ export function createMcpServer(
     {
       title: "Bash",
       description: config.toolMode !== "full"
-        ? `Run a shell command inside an open workspace. Use this for tests, builds, package scripts, search, file discovery, directory inspection, and Git lifecycle commands including git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. These Git writes are explicitly allowed when needed to complete the requested repository workflow; do not describe Git as inspection-only. In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use command-line tools such as grep, rg, find, ls, and tree for inspection. Outside Git operations, do not use ${toolNames.shell} to create or modify ordinary project files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read} for direct file reads. ${WEB_ONLY_SHELL_AGENT_POLICY} Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`
-        : `Run a shell command inside an open workspace. Use this for tests, builds, package scripts, commands that are better executed by the shell, and Git lifecycle commands including git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. These Git writes are explicitly allowed when needed to complete the requested repository workflow; do not describe Git as inspection-only. Outside Git operations, do not use ${toolNames.shell} to create or modify ordinary project files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection. ${WEB_ONLY_SHELL_AGENT_POLICY} Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`,
+        ? `Run a shell command inside an open workspace. Use this for tests, builds, package scripts, search, file discovery, directory inspection, and Git lifecycle commands including git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. These Git writes are explicitly allowed when needed to complete the requested repository workflow; do not describe Git as inspection-only. In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use command-line tools such as grep, rg, find, ls, and tree for inspection. Outside Git operations, do not use ${toolNames.shell} to create or modify ordinary project files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read} for direct file reads.${resumableBashHint} ${WEB_ONLY_SHELL_AGENT_POLICY} Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`
+        : `Run a shell command inside an open workspace. Use this for tests, builds, package scripts, commands that are better executed by the shell, and Git lifecycle commands including git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. These Git writes are explicitly allowed when needed to complete the requested repository workflow; do not describe Git as inspection-only. Outside Git operations, do not use ${toolNames.shell} to create or modify ordinary project files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection.${resumableBashHint} ${WEB_ONLY_SHELL_AGENT_POLICY} Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`,
       inputSchema: {
         workspaceId: z
           .string()
@@ -1994,7 +2014,7 @@ export function createMcpServer(
           .optional()
           .describe("Timeout in seconds. Defaults to 30, max 300."),
       },
-      outputSchema: resultOutputSchema(),
+      outputSchema: config.resumableBash ? processOutputSchema() : resultOutputSchema(),
       ...toolWidgetDescriptorMeta(config, "shell"),
       annotations: SHELL_TOOL_ANNOTATIONS,
     },
@@ -2024,6 +2044,33 @@ export function createMcpServer(
         workspace,
         workingDirectory,
       );
+      if (config.resumableBash) {
+        const snapshot = await processSessions.start({
+          workspaceId,
+          command: input.command,
+          cwd,
+          workspaceRoot: workspace.root,
+          yieldTimeMs: config.resumableBashYieldMs,
+          timeoutMs: (input.timeout ?? 30) * 1_000,
+        });
+        logToolCall(config, {
+          tool: toolNames.shell,
+          workspaceId,
+          workingDirectory: workingDirectory ?? ".",
+          command: input.command,
+          commandLength: input.command.length,
+          success: true,
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+        return processToolResponse(toolNames.shell, workspaceId, snapshot, {
+          command: input.command,
+          workingDirectory: workingDirectory ?? ".",
+          running: snapshot.running,
+          exitCode: snapshot.exitCode,
+          timedOut: snapshot.timedOut,
+          wallTimeMs: snapshot.wallTimeMs,
+        });
+      }
       const response = await runShellTool(input, {
         cwd,
         root: workspace.root,
@@ -2074,7 +2121,7 @@ export function createMcpServer(
   );
   }
 
-  if (config.toolMode === "codex") {
+  if (config.toolMode === "codex" || config.resumableBash) {
     registerCodexProcessTools(server, config, workspaces, processSessions);
   }
 

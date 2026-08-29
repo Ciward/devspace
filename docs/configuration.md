@@ -106,6 +106,14 @@ MCP clients discover metadata from:
 The `codex` mode must be selected through `DEVSPACE_TOOL_MODE` and always uses
 its fixed short tool names regardless of `DEVSPACE_TOOL_NAMING`.
 
+Set `DEVSPACE_RESUMABLE_BASH=1` to retain the selected `minimal` or `full` tool
+surface while making `bash` use process sessions. A command that exceeds
+`DEVSPACE_RESUMABLE_BASH_YIELD_MS` (default `10000`) returns a `sessionId` and
+continues independently of the current MCP request; poll it with `write_stdin`.
+This option also exposes `exec_command` and `write_stdin`. The legacy `bash`
+`timeout` remains the total process lifetime, while `exec_command` defaults to a
+300-second total lifetime and accepts an explicit `timeoutMs` up to one hour.
+
 Codex-mode commands run without a PTY by default. Set `tty: true` on
 `exec_command` for interactive terminal programs. PTY support uses the optional
 `node-pty` dependency; `write_stdin` can send input, poll output, and resize PTY

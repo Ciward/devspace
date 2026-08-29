@@ -42,6 +42,8 @@ assert.ok(
 assert.match(compose, /DEVSPACE_SUBAGENTS:\s*"1"/);
 assert.match(compose, /DEVSPACE_TOOL_MODE:\s*full/);
 assert.match(compose, /DEVSPACE_WIDGETS:\s*full/);
+assert.match(compose, /DEVSPACE_RESUMABLE_BASH:\s*"1"/);
+assert.match(compose, /DEVSPACE_RESUMABLE_BASH_YIELD_MS:\s*"5000"/);
 assert.match(compose, /TMPDIR:\s*\/tmp/);
 assert.match(compose, /GOTMPDIR:\s*\/tmp/);
 assert.ok(

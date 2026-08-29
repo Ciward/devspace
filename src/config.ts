@@ -21,6 +21,8 @@ export interface ServerConfig {
   allowedHosts: string[];
   publicBaseUrl: string;
   toolMode: ToolMode;
+  resumableBash: boolean;
+  resumableBashYieldMs: number;
   widgets: WidgetMode;
   stateDir: string;
   worktreeRoot: string;
@@ -251,6 +253,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     allowedHosts: parseAllowedHosts(env.DEVSPACE_ALLOWED_HOSTS, derivedAllowedHosts),
     publicBaseUrl,
     toolMode: parseToolMode(env),
+    resumableBash: parseBoolean(env.DEVSPACE_RESUMABLE_BASH),
+    resumableBashYieldMs: parsePositiveInteger(
+      env.DEVSPACE_RESUMABLE_BASH_YIELD_MS,
+      10_000,
+      "DEVSPACE_RESUMABLE_BASH_YIELD_MS",
+      30_000,
+    ),
     widgets: parseWidgetMode(env.DEVSPACE_WIDGETS),
     stateDir: resolve(expandHomePath(env.DEVSPACE_STATE_DIR ?? files.config.stateDir ?? defaultStateDir())),
     worktreeRoot: resolve(expandHomePath(env.DEVSPACE_WORKTREE_ROOT ?? files.config.worktreeRoot ?? defaultWorktreeRoot())),

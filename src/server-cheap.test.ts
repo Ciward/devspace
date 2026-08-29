@@ -24,6 +24,8 @@ const config: ServerConfig = {
   ],
   allowedHosts: ["localhost", "127.0.0.1", "::1", "devspace.example.com"],
   toolMode: "minimal",
+  resumableBash: false,
+  resumableBashYieldMs: 10_000,
   widgets: "full",
   stateDir: "/Users/alice/.local/share/devspace",
   worktreeRoot: "/Users/alice/.devspace/worktrees",

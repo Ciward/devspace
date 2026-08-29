@@ -30,6 +30,8 @@ services:
       DEVSPACE_PUBLIC_BASE_URL: ${DEVSERVER_PUBLIC_BASE_URL:-https://devserver.ciward.dpdns.org}
       DEVSPACE_ALLOWED_HOSTS: localhost,127.0.0.1,::1,devserver,devserver.ciward.dpdns.org
       DEVSPACE_TOOL_MODE: full
+      DEVSPACE_RESUMABLE_BASH: "1"
+      DEVSPACE_RESUMABLE_BASH_YIELD_MS: "5000"
       DEVSPACE_WIDGETS: full
       DEVSPACE_SKILLS: "1"
       DEVSPACE_SUBAGENTS: "1"
