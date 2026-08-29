@@ -29,8 +29,8 @@ services:
       DEVSPACE_WORKTREE_ARCHIVE_REMOTE: origin
       DEVSPACE_PUBLIC_BASE_URL: ${DEVSERVER_PUBLIC_BASE_URL:-https://devserver.ciward.dpdns.org}
       DEVSPACE_ALLOWED_HOSTS: localhost,127.0.0.1,::1,devserver,devserver.ciward.dpdns.org
-      DEVSPACE_TOOL_MODE: codex
-      DEVSPACE_WIDGETS: changes
+      DEVSPACE_TOOL_MODE: full
+      DEVSPACE_WIDGETS: full
       DEVSPACE_SKILLS: "1"
       DEVSPACE_SUBAGENTS: "1"
       DEVSPACE_ARTIFACTS: "0"
