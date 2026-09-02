@@ -1,0 +1,6 @@
+version = 3
+root = "/srv/devserver/containerd"
+state = "/run/containerd-devserver"
+
+[grpc]
+  address = "/run/containerd-devserver/containerd.sock"

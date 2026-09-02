@@ -1,0 +1,14 @@
+[Unit]
+Description=DevServer isolated Docker network rules
+After=docker.service docker-devserver.service
+Wants=docker.service
+Requires=docker-devserver.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/devserver-network.sh up
+ExecStop=/usr/local/libexec/devserver-network.sh down
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=DevServer isolated containerd runtime
+Documentation=https://containerd.io
+After=network.target
+RequiresMountsFor=/srv/devserver
+ConditionPathIsMountPoint=/srv/devserver
+
+[Service]
+Type=notify
+ExecStartPre=-/sbin/modprobe overlay
+ExecStart=/usr/bin/containerd --config /etc/devserver-runtime/containerd.toml
+Delegate=yes
+KillMode=process
+Restart=always
+RestartSec=5
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

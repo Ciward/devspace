@@ -1,0 +1,11 @@
+[Unit]
+Description=DevServer loopback health proxy
+After=devserver-network.service
+Requires=devserver-network.service
+
+[Service]
+ExecStart=/lib/systemd/systemd-socket-proxyd 172.30.250.10:7676
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true

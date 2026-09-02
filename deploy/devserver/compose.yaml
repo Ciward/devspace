@@ -46,13 +46,17 @@ services:
       DEVSPACE_LOG_SHELL_COMMANDS: "0"
       NODE_ENV: production
     volumes:
-      - ${DEVSERVER_HOME:-/home/ubuntu/.devserver/home}:/home/ubuntu
-      - ${DEVSERVER_WORK_ROOT:-/home/ubuntu/work}:/home/ubuntu/work
-      - ${DEVSERVER_TMP_ROOT:-/home/ubuntu/.devserver/tmp80}:/tmp
-    ports:
-      - 127.0.0.1:17676:7676
+      - /srv/devserver/runtime/home:/home/ubuntu
+      - /srv/devserver/runtime/work:/home/ubuntu/work
+      - /srv/devserver/runtime/tmp:/tmp
     networks:
-      - edge
+      edge:
+        ipv4_address: 172.30.250.10
+    logging:
+      driver: json-file
+      options:
+        max-size: "64m"
+        max-file: "2"
     read_only: true
     tmpfs:
       - /run:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=0755
@@ -71,6 +75,7 @@ services:
     cpus: 4.0
     mem_limit: 12g
     memswap_limit: 16g
+    oom_score_adj: 500
     pids_limit: 4096
     ulimits:
       nofile:
@@ -100,9 +105,15 @@ services:
       - /etc/cloudflared/config.yml
       - run
     volumes:
-      - ${DEVSERVER_CLOUDFLARED_DIR:-/home/ubuntu/.devserver/cloudflared}:/etc/cloudflared:ro
+      - /srv/devserver/runtime/cloudflared:/etc/cloudflared:ro
     networks:
-      - edge
+      edge:
+        ipv4_address: 172.30.250.11
+    logging:
+      driver: json-file
+      options:
+        max-size: "64m"
+        max-file: "2"
     depends_on:
       devserver:
         condition: service_healthy
@@ -122,4 +133,4 @@ services:
 networks:
   edge:
     name: devserver-edge
-    driver: bridge
+    external: true

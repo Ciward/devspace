@@ -6,7 +6,8 @@ readonly KEY_NAME="${1:-devserver}"
 readonly POSTGRES_CONTAINER="${TOKENLAB_POSTGRES_CONTAINER:-sub2api-postgres}"
 readonly POSTGRES_USER="${TOKENLAB_POSTGRES_USER:-sub2api}"
 readonly POSTGRES_DATABASE="${TOKENLAB_POSTGRES_DATABASE:-sub2api}"
-readonly DEVSERVER_HOME="${DEVSERVER_HOME:-/home/ubuntu/.devserver/home}"
+readonly EXPECTED_DEVICE="${DEVSERVER_STORAGE_DEVICE:-/dev/sdb1}"
+readonly DEVSERVER_HOME="/srv/devserver/runtime/home"
 readonly CODEX_DIR="${DEVSERVER_HOME}/.codex"
 readonly CODEX_CONFIG="${CODEX_DIR}/config.toml"
 readonly CODEX_AUTH="${CODEX_DIR}/auth.json"
@@ -19,6 +20,16 @@ fi
 if [[ ! "$MAX_CONCURRENT_THREADS" =~ ^[1-9][0-9]*$ ]] || (( MAX_CONCURRENT_THREADS > 32 )); then
   printf 'DEVSERVER_CODEX_MAX_CONCURRENT_THREADS must be between 1 and 32\n' >&2
   exit 2
+fi
+
+mountpoint -q "/srv/devserver" || {
+  printf '/srv/devserver is not mounted\n' >&2
+  exit 5
+}
+actual_source="$(findmnt -rn -T "/srv/devserver" -o SOURCE)"
+if [[ "$(readlink -f "$actual_source")" != "$(readlink -f "$EXPECTED_DEVICE")" ]]; then
+  printf 'Unexpected DevServer storage source: %s\n' "$actual_source" >&2
+  exit 5
 fi
 
 query="SELECT id, key FROM api_keys WHERE name = '${KEY_NAME}' AND status = 'active' AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY id;"

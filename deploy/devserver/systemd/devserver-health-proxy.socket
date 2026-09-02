@@ -1,0 +1,9 @@
+[Unit]
+Description=DevServer loopback health proxy socket
+
+[Socket]
+ListenStream=127.0.0.1:17676
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target
