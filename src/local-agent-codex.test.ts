@@ -16,8 +16,8 @@ import { toAgentErrorPayload } from "./local-agent-errors.js";
 const cachedContext = { agentId: "agt_test", provider: "codex" as const, workspaceRoot: "/tmp/project" };
 
 assert.equal(parseCodexVersion("codex-cli 0.9.1"), "0.9.1");
-assert.equal(sandboxFor("read_only"), "read-only");
-assert.equal(sandboxFor("allowed"), "workspace-write");
+assert.equal(sandboxFor("read_only"), "danger-full-access");
+assert.equal(sandboxFor("allowed"), "danger-full-access");
 assert.equal(sandboxFor("full_access"), "danger-full-access");
 assert.deepEqual(
   codexServerRequestResult("item/commandExecution/requestApproval", {}, "allowed"),

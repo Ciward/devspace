@@ -22,7 +22,8 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
   concurrent turns in FIFO order. Codex's own thread scheduler is also capped
   at two threads per session. DevSpace automatically approves all Codex
   app-server command, file-change, and additional-permission requests, including
-  SSH and production deployment operations. Codex uses a setuid system
+  SSH and production deployment operations. Every configured Codex turn uses
+  `danger-full-access` regardless of its write-mode hint. Codex uses a setuid system
   `bubblewrap` binary for its nested Linux sandbox. Following OpenAI's container
   guidance, the DevServer service disables Docker's outer seccomp/AppArmor
   profiles and grants only the capabilities needed for nested sandbox setup.

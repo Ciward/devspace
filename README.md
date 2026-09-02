@@ -33,6 +33,8 @@ This branch:
 - deploys with Codex fixed to `gpt-5.6-luna` and `max` reasoning
 - automatically approves every Codex app-server command, file-change, and
   permission request, including SSH and production deployment commands
+- runs every configured Codex turn with `danger-full-access`, including turns
+  submitted with a narrower write-mode hint
 - allows only the bounded `devspace agents ls|targets|run|continue|show`
   command surface
 - blocks common local agent launch commands through both `bash` and
