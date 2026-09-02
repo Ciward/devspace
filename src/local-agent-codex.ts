@@ -146,7 +146,11 @@ export class CodexAppServerRuntime implements LocalAgentRuntime {
         }
 
         await callbacks?.onSessionId?.(threadId);
-        const completed = await this.rpc.runTurn(threadId, turnParams(input, threadId));
+        const completed = await this.rpc.runTurn(
+          threadId,
+          turnParams(input, threadId),
+          input.writeMode,
+        );
         const parsed = parseCompletedTurn(completed.event.params, completed.items);
         if (parsed.failure) {
           throw new AgentProviderExecutionError({
@@ -317,6 +321,7 @@ interface CodexTurnResult {
 
 interface CodexTurnAccumulator {
   threadId: string;
+  writeMode?: LocalAgentWriteMode;
   turnId?: string;
   items: unknown[];
   completed?: CodexEvent;
@@ -359,7 +364,11 @@ class CodexAppServerRpc {
     this.write({ method, ...(params === undefined ? {} : { params }) });
   }
 
-  async runTurn(threadId: string, params: unknown): Promise<CodexTurnResult> {
+  async runTurn(
+    threadId: string,
+    params: unknown,
+    writeMode?: LocalAgentWriteMode,
+  ): Promise<CodexTurnResult> {
     if (this.fatalError) throw this.fatalError;
     if (this.turns.has(threadId)) throw new Error(`Codex thread ${threadId} already has an active turn.`);
     let resolveTurn!: (result: CodexTurnResult) => void;
@@ -370,6 +379,7 @@ class CodexAppServerRpc {
     });
     const turn: CodexTurnAccumulator = {
       threadId,
+      writeMode,
       items: [],
       resolve: resolveTurn,
       reject: rejectTurn,
@@ -422,7 +432,13 @@ class CodexAppServerRpc {
       return;
     }
     if (id && method) {
-      this.write({ id: message.id, error: { code: -32601, message: `Unsupported app-server request: ${method}` } });
+      const turn = this.findTurn({ method, params: message.params });
+      const result = codexServerRequestResult(method, message.params, turn?.writeMode);
+      if (result === undefined) {
+        this.write({ id: message.id, error: { code: -32601, message: `Unsupported app-server request: ${method}` } });
+      } else {
+        this.write({ id: message.id, result });
+      }
       return;
     }
     if (!method) return;
@@ -449,6 +465,34 @@ class CodexAppServerRpc {
     if (!turnId) return undefined;
     return Array.from(this.turns.values()).find((turn) => turn.turnId === turnId);
   }
+}
+
+export function codexServerRequestResult(
+  method: string,
+  params: unknown,
+  _writeMode: LocalAgentWriteMode | undefined,
+): Record<string, unknown> | undefined {
+  if (method === "item/commandExecution/requestApproval") {
+    return { decision: "accept" };
+  }
+  if (method === "execCommandApproval") {
+    return { decision: "approved" };
+  }
+  if (method === "item/fileChange/requestApproval") {
+    return { decision: "accept" };
+  }
+  if (method === "applyPatchApproval") {
+    return { decision: "approved" };
+  }
+  if (method === "item/permissions/requestApproval") {
+    return {
+      permissions: asRecord(params)?.permissions ?? {},
+      scope: "session",
+      strictAutoReview: false,
+    };
+  }
+
+  return undefined;
 }
 
 function threadParams(input: LocalAgentRunInput): Record<string, unknown> {

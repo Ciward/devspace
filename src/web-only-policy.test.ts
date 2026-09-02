@@ -28,6 +28,8 @@ for (const command of [
   "bash -lc 'cursor-agent acp'",
   "omx team 3:executor 'fix this'",
   "ask-claude 'review this'",
+  "ssh TokenLabOVH 'codex exec --full-auto deploy'",
+  "ssh -o BatchMode=yes TokenLabOVH \"omx team 3:executor deploy\"",
 ]) {
   assert.match(
     policy.findWebOnlyCommandViolation(command) ?? "",
@@ -52,6 +54,10 @@ for (const command of [
   "devspace agents run codex 'implement this' --json",
   "devspace agents continue agt_123 'finish this' --json",
   "devspace agents show agt_123 --json",
+  "ssh TokenLabOVH hostname",
+  "ssh -o BatchMode=yes TokenLabOVH 'docker ps'",
+  "scp ./artifact.tgz TokenLabOVH:/tmp/artifact.tgz",
+  "rsync -az ./dist/ TokenLabOVH:/tmp/dist/",
 ]) {
   assert.equal(
     policy.findWebOnlyCommandViolation(command),

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import {
   CodexAppServerRuntime,
   CodexLocalAgentDriver,
+  codexServerRequestResult,
   codexCommandEnvironment,
   parseCodexVersion,
   resolveCodexCommand,
@@ -18,6 +19,38 @@ assert.equal(parseCodexVersion("codex-cli 0.9.1"), "0.9.1");
 assert.equal(sandboxFor("read_only"), "read-only");
 assert.equal(sandboxFor("allowed"), "workspace-write");
 assert.equal(sandboxFor("full_access"), "danger-full-access");
+assert.deepEqual(
+  codexServerRequestResult("item/commandExecution/requestApproval", {}, "allowed"),
+  { decision: "accept" },
+);
+assert.deepEqual(
+  codexServerRequestResult("item/fileChange/requestApproval", {}, "full_access"),
+  { decision: "accept" },
+);
+assert.deepEqual(
+  codexServerRequestResult("execCommandApproval", {}, "read_only"),
+  { decision: "approved" },
+);
+assert.deepEqual(
+  codexServerRequestResult("applyPatchApproval", {}, "read_only"),
+  { decision: "approved" },
+);
+assert.deepEqual(
+  codexServerRequestResult(
+    "item/permissions/requestApproval",
+    { permissions: { network: { enabled: true } } },
+    "allowed",
+  ),
+  {
+    permissions: { network: { enabled: true } },
+    scope: "session",
+    strictAutoReview: false,
+  },
+);
+assert.deepEqual(
+  codexServerRequestResult("item/commandExecution/requestApproval", {}, "read_only"),
+  { decision: "accept" },
+);
 assert.equal(
   codexCommandEnvironment({ CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "test", PATH: "/tmp/bin" }).CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
   undefined,
@@ -45,9 +78,18 @@ if (process.platform !== "win32") {
   await writeFile(command, `#!/usr/bin/env node
 import readline from "node:readline";
 let turn = 0;
+const approvals = new Map();
 const output = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
+  if (!message.method && approvals.has(String(message.id))) {
+    const pending = approvals.get(String(message.id));
+    approvals.delete(String(message.id));
+    const decision = message.result?.decision || "error";
+    const item = { type: "agentMessage", text: "approval " + decision };
+    output({ method: "turn/completed", params: { threadId: pending.threadId, turn: { id: pending.turnId, status: "completed", items: [item] } } });
+    return;
+  }
   if (message.method === "initialize") {
     output({ id: message.id, result: { userAgent: "fake" } });
     return;
@@ -65,6 +107,24 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const turnId = "turn_" + turn;
     output({ id: message.id, result: { turn: { id: turnId } } });
     setImmediate(() => {
+      if (message.params.input[0].text === "approve ssh" || message.params.input[0].text === "approve remote agent") {
+        const approvalId = "approval_" + turn;
+        approvals.set(approvalId, { threadId: message.params.threadId, turnId });
+        output({
+          id: approvalId,
+          method: "item/commandExecution/requestApproval",
+          params: {
+            threadId: message.params.threadId,
+            turnId,
+            itemId: "item_" + turn,
+            startedAtMs: Date.now(),
+            command: message.params.input[0].text === "approve ssh"
+              ? "ssh TokenLabOVH hostname"
+              : "ssh TokenLabOVH 'codex exec deploy'",
+          },
+        });
+        return;
+      }
       if (message.params.input[0].text === "fail") {
         output({ method: "turn/completed", params: { threadId: message.params.threadId, turn: { id: turnId, status: "failed", error: { message: "fake failure" } } } });
         return;
@@ -109,6 +169,24 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     assert.equal(first.finalResponse, "fake response 1");
     assert.equal(resumed.providerSessionId, "thread_new");
     assert.equal(resumed.finalResponse, "fake response 2");
+    const approved = await runtime.run({
+      prompt: "approve ssh",
+      workspaceRoot: "/tmp/project",
+      providerSessionId: first.providerSessionId ?? undefined,
+      writeMode: "allowed",
+    });
+    assert.equal(approved.isOk(), true);
+    if (approved.isErr()) throw approved.error;
+    assert.equal(approved.value.finalResponse, "approval accept");
+    const remoteAgentApproval = await runtime.run({
+      prompt: "approve remote agent",
+      workspaceRoot: "/tmp/project",
+      providerSessionId: first.providerSessionId ?? undefined,
+      writeMode: "allowed",
+    });
+    assert.equal(remoteAgentApproval.isOk(), true);
+    if (remoteAgentApproval.isErr()) throw remoteAgentApproval.error;
+    assert.equal(remoteAgentApproval.value.finalResponse, "approval accept");
     const failed = await runtime.run({
       prompt: "fail",
       workspaceRoot: "/tmp/project",

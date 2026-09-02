@@ -1,12 +1,14 @@
 import { basename } from "node:path";
 
-export const WEB_ONLY_SHELL_AGENT_POLICY = "Direct local agent CLIs such as Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent, Copilot CLI, and OMX orchestration are blocked by the web-only policy. Bounded subagent delegation is explicitly allowed through configured `devspace agents targets`, `devspace agents ls`, `devspace agents run`, `devspace agents continue`, and `devspace agents show` commands when subagents are enabled. Do not reject those allowed `devspace agents` commands as local-agent execution.";
+export const WEB_ONLY_SHELL_AGENT_POLICY = "Direct local agent CLIs such as Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent, Copilot CLI, and OMX orchestration are blocked by the web-only policy, including when launched through SSH. SSH, SCP, and rsync are otherwise explicitly allowed for remote development and deployment work. Bounded subagent delegation is explicitly allowed through configured `devspace agents targets`, `devspace agents ls`, `devspace agents run`, `devspace agents continue`, and `devspace agents show` commands when subagents are enabled. Do not reject those allowed `devspace agents` commands as local-agent execution.";
 
 export const WEB_ONLY_POLICY_INSTRUCTIONS = [
   "STRICT WEB-ONLY EXECUTION POLICY:",
   "You are the web-hosted ChatGPT or Claude model connected through DevSpace.",
   "Perform work with DevSpace workspace tools and delegate only through the configured `devspace agents` commands when a bounded subagent materially helps.",
   "Never launch or call a local agent directly, including Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent, Copilot CLI, or OMX agent orchestration.",
+  "SSH, SCP, and rsync to configured remote hosts are explicitly allowed for inspection, testing, deployment, and production operations authorized by the user; do not claim that DevSpace or Codex blocks those commands.",
+  "The SSH exception does not permit launching Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent, Copilot CLI, or OMX orchestration on the remote host.",
   "DevSpace enforces the configured provider, model, and effort policy for every allowed subagent call.",
   "Git lifecycle writes are explicitly allowed inside the active workspace: use git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag when needed to complete the user's requested repository workflow; never claim that DevSpace restricts Git to inspection-only commands.",
   "The Git exception permits repository index, metadata, history, refs, worktree, and remote writes, but does not permit using shell redirection or generated scripts to edit ordinary project files.",
@@ -97,6 +99,14 @@ function inspectCommandWords(input: string[]): string | undefined {
     }
   }
 
+  if (executable === "ssh") {
+    const nested = sshRemoteCommand(words.slice(1));
+    if (nested) {
+      const violation = findWebOnlyCommandViolation(nested);
+      if (violation) return violation.replace(/^.*\(([^)]+)\).*$/, "$1");
+    }
+  }
+
   for (let index = 0; index < words.length - 1; index += 1) {
     if (words[index] === "-exec" || executable === "xargs") {
       const candidate = executableName(words[index + 1]);
@@ -172,6 +182,29 @@ function shellCommandArgument(args: string[]): string | undefined {
     if (option === "-c" || option === "-lc" || option === "-cl") return args[index + 1];
   }
   return undefined;
+}
+
+const SSH_OPTIONS_WITH_VALUE = new Set([
+  "-B", "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L",
+  "-l", "-m", "-O", "-o", "-P", "-p", "-Q", "-R", "-S", "-W", "-w",
+]);
+
+function sshRemoteCommand(args: string[]): string | undefined {
+  let index = 0;
+  while (index < args.length) {
+    const word = args[index];
+    if (word === "--") {
+      index += 1;
+      break;
+    }
+    if (!word.startsWith("-") || word === "-") break;
+    index += SSH_OPTIONS_WITH_VALUE.has(word) ? 2 : 1;
+  }
+
+  if (index >= args.length) return undefined;
+  const remote = args.slice(index + 1);
+  if (remote[0] === "--") remote.shift();
+  return remote.length > 0 ? remote.join(" ") : undefined;
 }
 
 function nestedShellCommands(command: string): string[] {
