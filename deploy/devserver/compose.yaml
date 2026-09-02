@@ -65,8 +65,8 @@ services:
       - seccomp=unconfined
       - apparmor=unconfined
     cpus: 4.0
-    mem_limit: 8g
-    memswap_limit: 12g
+    mem_limit: 12g
+    memswap_limit: 16g
     pids_limit: 4096
     ulimits:
       nofile:

@@ -22,7 +22,7 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
   `bubblewrap` binary for its nested Linux sandbox. Following OpenAI's container
   guidance, the DevServer service disables Docker's outer seccomp/AppArmor
   profiles and grants only the capabilities needed for nested sandbox setup.
-- The container is limited to 4 CPUs, 8 GiB memory, 12 GiB memory plus swap, and
+- The container is limited to 4 CPUs, 12 GiB memory, 16 GiB memory plus swap, and
   4096 PIDs. Its root filesystem is read-only. All Linux capabilities are
   dropped except `SYS_ADMIN`, `SYS_CHROOT`, `SETUID`, `SETGID`, `SYS_PTRACE`,
   and `NET_ADMIN`, which are granted to let the nested Codex/bubblewrap sandbox
