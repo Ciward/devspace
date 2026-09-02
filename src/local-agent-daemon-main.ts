@@ -29,6 +29,7 @@ const manager = new LocalAgentManager({
   allowedRoots: config.allowedRoots,
   logger: log,
   subagents: config.subagents,
+  maxConcurrentTurns: config.subagentMaxConcurrentTurns,
 });
 const daemon = new LocalAgentDaemon({
   stateDir: paths.stateDir,

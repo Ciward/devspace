@@ -17,12 +17,11 @@ import {
 import express from "express";
 import type { Request, Response } from "express";
 import * as z from "zod/v4";
-import { applyPatch } from "./apply-patch.js";
 import {
   isArtifactDownloadSupportedPlatform,
   registerArtifactTools,
 } from "./artifact-tools.js";
-import { loadConfig, type ServerConfig, type WidgetMode } from "./config.js";
+import { loadConfig, type ServerConfig } from "./config.js";
 import {
   createOpenAIIncomingArtifactAdapter,
   type IncomingArtifactAdapter,
@@ -31,24 +30,15 @@ import {
   logEvent,
   requestIp,
   requestPath,
-  commandPreview,
   sessionIdPrefix,
 } from "./logger.js";
-import {
-  editFileTool,
-  findFilesTool,
-  grepFilesTool,
-  listDirectoryTool,
-  readFileTool,
-  runShellTool,
-  writeFileTool,
-} from "./pi-tools.js";
+import { readFileTool } from "./pi-tools.js";
 import { SingleUserOAuthProvider } from "./oauth-provider.js";
 import {
   McpSessionRegistry,
   type McpSessionCloseResult,
 } from "./mcp-sessions.js";
-import { ProcessSessionManager, type ProcessSnapshot } from "./process-sessions.js";
+import { ProcessSessionManager } from "./process-sessions.js";
 import { createReviewCheckpointManager } from "./review-checkpoints.js";
 import { openAiConversationScopeId } from "./request-meta.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
@@ -59,42 +49,32 @@ import {
   getLocalAgentProviderAvailabilitySnapshot,
 } from "./local-agent-availability.js";
 import {
-  findWebOnlyCommandViolation,
-  WEB_ONLY_POLICY_INSTRUCTIONS,
-  WEB_ONLY_SHELL_AGENT_POLICY,
-} from "./web-only-policy.js";
-import {
   buildLocalAgentCatalog,
   buildLocalAgentProviderStatuses,
   formatLocalAgentProviderStatusSummary,
   type LocalAgentProviderStatus,
 } from "./local-agent-catalog.js";
+import { WEB_ONLY_POLICY_INSTRUCTIONS } from "./web-only-policy.js";
+import { getToolSurface } from "./tool-surfaces/index.js";
+import {
+  contentText,
+  logFailedToolResponse,
+  logToolCall,
+  resultOutputSchema,
+  textBlock,
+  workspaceAppDescriptorMeta,
+} from "./tool-surfaces/shared.js";
+import {
+  WORKSPACE_APP_URI,
+  toolNames,
+  workspaceIdDescription,
+  type ToolContent,
+  type ToolNames,
+  type ToolSurface,
+} from "./tool-surfaces/types.js";
 
 type Transport = StreamableHTTPServerTransport;
-// MCP clients can reconnect without closing the previous transport. Bound stale
-// session retention so abandoned MCP servers do not accumulate for the life of the process.
-const MCP_SESSION_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
-const MCP_SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1_000;
-const WORKSPACE_APP_URI = "ui://devspace/workspace-app.html";
 const WORKSPACE_APP_MANIFEST_ENTRY = "workspace-app.html";
-const WRITE_TOOL_ANNOTATIONS = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: false,
-};
-const EDIT_TOOL_ANNOTATIONS = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: false,
-};
-const SHELL_TOOL_ANNOTATIONS = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: true,
-};
 
 interface RunningServer {
   app: ReturnType<typeof createMcpExpressApp>;
@@ -110,114 +90,7 @@ export interface AccessSummary {
   worktreeRoot: string;
   worktreeMaxCount: number;
   worktreeArchiveRemote: string;
-  openWorkspaceExamples: Array<{
-    path: string;
-    mode: "checkout" | "worktree";
-  }>;
-}
-
-type ToolContent =
-  | { type: "text"; text: string }
-  | { type: "image"; data: string; mimeType: string };
-
-interface WorkspaceAppManifestEntry {
-  file: string;
-  css?: string[];
-  isEntry?: boolean;
-}
-
-type WorkspaceAppManifest = Record<string, WorkspaceAppManifestEntry>;
-
-interface DiffStats {
-  additions: number;
-  removals: number;
-}
-
-type ToolWidgetKind =
-  | "workspace"
-  | "read"
-  | "write"
-  | "edit"
-  | "search"
-  | "directory"
-  | "shell"
-  | "show_changes";
-
-interface ToolDefinitionMeta extends Record<string, unknown> {
-  ui: {
-    resourceUri: string;
-    visibility: ["model"];
-  };
-}
-
-type EmptyToolDefinitionMeta = Record<string, unknown> & {
-  "ui/resourceUri"?: string;
-};
-
-interface ToolWidgetDescriptorMeta {
-  _meta: ToolDefinitionMeta | EmptyToolDefinitionMeta;
-}
-
-function shouldAttachWidget(mode: WidgetMode, kind: ToolWidgetKind): boolean {
-  switch (mode) {
-    case "off":
-      return false;
-    case "changes":
-      return kind === "workspace" || kind === "show_changes";
-    case "full":
-      return true;
-  }
-}
-
-function toolWidgetDescriptorMeta(
-  config: ServerConfig,
-  kind: ToolWidgetKind,
-): ToolWidgetDescriptorMeta {
-  if (!shouldAttachWidget(config.widgets, kind)) return { _meta: {} };
-
-  return {
-    _meta: {
-      ui: {
-        resourceUri: WORKSPACE_APP_URI,
-        visibility: ["model"],
-      },
-    },
-  };
-}
-
-const toolNames = {
-  openWorkspace: "open_workspace",
-  completeWorkspace: "complete_workspace",
-  workspaceInfo: "workspace_info",
-  listProjects: "list_projects",
-  read: "read",
-  write: "write",
-  edit: "edit",
-  grep: "grep",
-  glob: "glob",
-  ls: "ls",
-  shell: "bash",
-} as const;
-
-type ToolNames = typeof toolNames;
-
-const workspaceIdDescription =
-  "Workspace to use. Reuse the current project's workspaceId.";
-
-interface ToolLogFields {
-  tool: string;
-  workspaceId?: string;
-  path?: string;
-  workingDirectory?: string;
-  command?: string;
-  commandLength?: number;
-  success: boolean;
-  durationMs: number;
-  error?: string;
-}
-
-export function toolNamesFor(_config: ServerConfig): ToolNames {
-  return toolNames;
+  openWorkspaceExamples: Array<{ path: string; mode: "checkout" | "worktree" }>;
 }
 
 export interface ProjectCandidate {
@@ -227,16 +100,12 @@ export interface ProjectCandidate {
   markers: string[];
 }
 
+export function toolNamesFor(_config: ServerConfig): ToolNames {
+  return toolNames;
+}
+
 export function accessSummary(config: ServerConfig): AccessSummary {
   const primaryRoot = config.allowedRoots[0];
-  const checkoutExamples = config.allowedRoots.slice(0, 3).map((path) => ({
-    path,
-    mode: "checkout" as const,
-  }));
-  const worktreeExample = primaryRoot
-    ? [{ path: primaryRoot, mode: "worktree" as const }]
-    : [];
-
   return {
     publicMcpUrl: new URL("/mcp", config.publicBaseUrl).toString(),
     localMcpUrl: `http://${config.host}:${config.port}/mcp`,
@@ -244,21 +113,21 @@ export function accessSummary(config: ServerConfig): AccessSummary {
     worktreeRoot: config.worktreeRoot,
     worktreeMaxCount: config.worktreeMaxCount,
     worktreeArchiveRemote: config.worktreeArchiveRemote,
-    openWorkspaceExamples: [...checkoutExamples, ...worktreeExample],
+    openWorkspaceExamples: [
+      ...config.allowedRoots.slice(0, 3).map((path) => ({ path, mode: "checkout" as const })),
+      ...(primaryRoot ? [{ path: primaryRoot, mode: "worktree" as const }] : []),
+    ],
   };
 }
 
 export function formatAccessSummary(summary: AccessSummary): string {
   const roots = summary.allowedRoots.map((root) => `- ${root}`).join("\n");
-  const examples = summary.openWorkspaceExamples
-    .map((example) => {
-      const input = example.mode === "checkout"
-        ? { path: example.path }
-        : { path: example.path, mode: example.mode };
-      return `- Call open_workspace with ${JSON.stringify(input)}`;
-    })
-    .join("\n");
-
+  const examples = summary.openWorkspaceExamples.map((example) => {
+    const input = example.mode === "checkout"
+      ? { path: example.path }
+      : { path: example.path, mode: example.mode };
+    return `- Call open_workspace with ${JSON.stringify(input)}`;
+  }).join("\n");
   return [
     WEB_ONLY_POLICY_INSTRUCTIONS,
     "Accessible local workspace roots:",
@@ -270,7 +139,7 @@ export function formatAccessSummary(summary: AccessSummary): string {
     `Worktree archive remote: ${summary.worktreeArchiveRemote}`,
     "Typical starting calls:",
     examples || "- No workspace examples available.",
-    "Only paths under the accessible roots can be opened as workspaces. Shell commands run with the local user's permissions, so keep work scoped to the active workspace unless the user explicitly asks otherwise.",
+    "Git lifecycle writes are explicitly allowed when required to complete the requested repository workflow, including git add, commit, and push.",
   ].join("\n");
 }
 
@@ -278,24 +147,20 @@ function formatAllowedRoots(config: ServerConfig): string {
   return config.allowedRoots.join(", ") || "(none configured)";
 }
 
-export function openWorkspaceDescription(config: ServerConfig, toolNames: ToolNames): string {
+export function openWorkspaceDescription(config: ServerConfig, names: ToolNames): string {
   return [
     "Start or recover work in a local project directory or isolated worktree when no usable workspaceId exists for it.",
     `Allowed roots are: ${formatAllowedRoots(config)}.`,
-    `If the user asks what local projects, folders, repositories, or workspaces are available, call ${toolNames.listProjects} first instead of guessing paths.`,
-    "Do not open ~ or arbitrary home-directory guesses; open one allowed root or a project directory under an allowed root.",
-    "Reuse the returned workspaceId throughout continued work in the same project or worktree.",
-    "Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, the current workspaceId is rejected, or the user explicitly asks to reopen.",
-    "By default this opens the actual checkout; set mode=\"worktree\" when the user asks for an isolated or parallel coding session.",
-    "Returns a workspaceId, loaded root project instructions, nested instruction file paths, and the DevSpace access summary.",
+    `Call ${names.listProjects} first when the user asks what local projects are available.`,
+    "Reuse the returned workspaceId throughout continued work.",
+    "Use mode=worktree for isolated or parallel Git work.",
   ].join(" ");
 }
 
 export function openWorkspacePathDescription(config: ServerConfig): string {
   return [
-    `Absolute path to a local project directory inside one of these allowed roots: ${formatAllowedRoots(config)}.`,
-    "Do not use \"~\" or guess common folders when the user asks what projects are available; call list_projects first.",
-    "You may pass an allowed root directly to inspect it, or a project/repository directory below an allowed root.",
+    `Absolute path to a local project directory inside: ${formatAllowedRoots(config)}.`,
+    `Do not use "~" or guess common folders; call ${toolNames.listProjects} first.`,
   ].join(" ");
 }
 
@@ -303,14 +168,13 @@ export function openWorkspaceErrorText(
   config: ServerConfig,
   attemptedPath: string,
   error: unknown,
-  toolNames: ToolNames,
+  names: ToolNames,
 ): string {
-  const message = error instanceof Error ? error.message : String(error);
   return [
     `Could not open workspace path: ${attemptedPath}`,
-    message,
+    error instanceof Error ? error.message : String(error),
     formatAccessSummary(accessSummary(config)),
-    `Call ${toolNames.listProjects} first if you need to discover available local projects instead of guessing paths.`,
+    `Call ${names.listProjects} first if you need to discover available projects.`,
   ].join("\n");
 }
 
@@ -325,7 +189,6 @@ async function pathExists(path: string): Promise<boolean> {
 
 export async function listProjectCandidates(config: ServerConfig): Promise<ProjectCandidate[]> {
   const candidates: ProjectCandidate[] = [];
-
   for (const root of config.allowedRoots) {
     let entries: Dirent<string>[];
     try {
@@ -333,7 +196,6 @@ export async function listProjectCandidates(config: ServerConfig): Promise<Proje
     } catch {
       continue;
     }
-
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
       const path = `${root.replace(/\/+$/, "")}/${entry.name}`;
@@ -346,50 +208,44 @@ export async function listProjectCandidates(config: ServerConfig): Promise<Proje
         ["README.md", await pathExists(`${path}/README.md`)],
         ["AGENTS.md", await pathExists(`${path}/AGENTS.md`)],
       ] as const;
-
       candidates.push({
         name: entry.name,
         path,
         root,
-        markers: markerChecks
-          .filter(([, exists]) => exists)
-          .map(([marker]) => marker),
+        markers: markerChecks.filter(([, exists]) => exists).map(([marker]) => marker),
       });
     }
   }
-
   return candidates.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-function serverInstructions(config: ServerConfig): string {
-  const artifactInstruction = config.artifactsEnabled && isArtifactDownloadSupportedPlatform()
-    ? " When the user supplies or generates a file that is not present on the DevSpace host, use download_artifact with its native file value, the existing workspace ID, and a suitable relative destination path chosen from the user's request and project structure. The tool refuses to overwrite an existing destination and returns the normalized workspace-relative path. Use normal workspace tools when explicit inspection, replacement, movement, renaming, or deletion is needed. Do not recreate binary files with write/edit calls or place signed URLs, native file objects, base64 content, or invented host paths in shell commands or logs."
-    : "";
-  const showChangesInstruction =
-    config.widgets === "changes"
-      ? " If the turn successfully modifies files by creating, editing, overwriting, deleting, moving, or applying patches, call show_changes exactly once for that workspace after the final related file change and before your final response so the user can inspect the aggregate diff for that turn. Do not call it after every individual file change; do not skip it because individual file-change tools already returned diffs."
+interface WorkspaceAppManifestEntry {
+  file: string;
+  css?: string[];
+  isEntry?: boolean;
+}
+
+type WorkspaceAppManifest = Record<string, WorkspaceAppManifestEntry>;
+
+function serverInstructions(
+  config: ServerConfig,
+  toolSurface: ToolSurface,
+): string {
+  const artifactInstruction =
+    config.artifactsEnabled && isArtifactDownloadSupportedPlatform()
+      ? " When the user supplies or generates a file that is not present on the DevSpace host, use download_artifact with its native file value, the existing workspace ID, and a suitable relative destination path chosen from the user's request and project structure. The tool refuses to overwrite an existing destination and returns the normalized workspace-relative path. Use normal workspace tools when explicit inspection, replacement, movement, renaming, or deletion is needed. Do not recreate binary files with write/edit calls or place signed URLs, native file objects, base64 content, or invented host paths in shell commands or logs."
       : "";
-  const completionInstruction = ` When working in a managed Git worktree, finish the requested implementation, verification, commit, push, and merge back into the source repository's current main branch. After the worktree HEAD is merged and the worktree is clean, call ${toolNames.completeWorkspace} exactly once to archive its HEAD to the configured remote, verify the remote archive, and remove the local worktree. Do not call it before the merge is complete.`;
-  const access = formatAccessSummary(accessSummary(config));
-
-  if (config.toolMode === "codex") {
-    return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} when no usable workspaceId exists for a project folder or isolated worktree, then keep using that workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. Use ${toolNames.read} for direct file reads, apply_patch for ordinary project-file modifications, exec_command for inspection, tests, builds, package scripts, and Git lifecycle commands including add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag, and write_stdin to poll or interact with running processes. Git writes required to complete the requested repository workflow are explicitly allowed; do not claim Git is inspection-only. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
-  }
-
-  const inspection = config.toolMode !== "full"
-    ? `In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use ${toolNames.shell} with command-line tools such as grep, rg, find, ls, and tree for search and directory inspection. `
-    : `Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection. `;
-
+  const showChangesInstruction =
+    " If the turn successfully modifies files by creating, editing, overwriting, deleting, moving, or applying patches, call show_changes exactly once for that workspace after the final related file change and before your final response so the user can inspect the aggregate diff for that turn. Do not call it after every individual file change.";
   const skills = config.skillsEnabled
     ? `When ${toolNames.openWorkspace} returns available skills and a task matches a skill, use ${toolNames.read} to read that skill's path before proceeding. Skill paths may be outside the workspace, but ${toolNames.read} only permits advertised SKILL.md files and files under already-loaded skill directories. `
     : "";
+  const agents = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
+  const common = `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected.`;
+  const access = formatAccessSummary(accessSummary(config));
+  const completionInstruction = ` When a managed worktree task is verified, committed, pushed, and merged into the source checkout, call ${toolNames.completeWorkspace} exactly once to archive and remove it.`;
 
-  const agentsMd = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
-  const processInstruction = config.resumableBash
-    ? `Use ${toolNames.shell} for short commands and exec_command for commands expected to run longer than a few seconds. When either returns a sessionId, call write_stdin until the process exits; never rerun the same command merely because it is still running. `
-    : "";
-
-  return `Use DevSpace as a local coding workspace. ${access}\nCall ${toolNames.openWorkspace} when no usable workspaceId exists for a project folder or isolated worktree, then keep using that workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. ${agentsMd}${skills}${inspection}${processInstruction}Prefer ${toolNames.edit} for targeted ordinary project-file modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, package scripts, and Git lifecycle commands including add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. Git writes required to complete the requested repository workflow are explicitly allowed; do not claim Git is inspection-only. Outside those Git operations, do not create or modify ordinary project files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
+  return `${common} ${access}\n${toolSurface.instructions({ agents, skills })}${artifactInstruction}${showChangesInstruction}${completionInstruction}`;
 }
 
 function formatVisibleAgent(agent: {
@@ -415,17 +271,6 @@ function formatAvailableAgentProvider(provider: {
     provider.note,
   ].filter(Boolean).join(", ");
   return `${provider.id}${details ? ` (${details})` : ""}`;
-}
-
-function resultOutputSchema(extra: z.ZodRawShape = {}): z.ZodRawShape {
-  return {
-    result: z
-      .string()
-      .describe(
-        "Model-readable result text for follow-up reasoning and plain MCP hosts.",
-      ),
-    ...extra,
-  };
 }
 
 const workspaceSkillOutputSchema = z.object({
@@ -458,38 +303,11 @@ const workspaceAvailableAgentsFileOutputSchema = z.object({
   path: z.string(),
 });
 
-const accessSummaryOutputSchema = z.object({
-  publicMcpUrl: z.string(),
-  localMcpUrl: z.string(),
-  allowedRoots: z.array(z.string()),
-  worktreeRoot: z.string(),
-  worktreeMaxCount: z.number(),
-  worktreeArchiveRemote: z.string(),
-  openWorkspaceExamples: z.array(z.object({
-    path: z.string(),
-    mode: z.enum(["checkout", "worktree"]),
-  })),
-});
-
 const projectCandidateOutputSchema = z.object({
   name: z.string(),
   path: z.string(),
   root: z.string(),
   markers: z.array(z.string()),
-});
-
-const reviewFileOutputSchema = z.object({
-  path: z.string(),
-  previousPath: z.string().optional(),
-  type: z.enum(["change", "rename-pure", "rename-changed", "new", "deleted"]),
-  additions: z.number(),
-  removals: z.number(),
-});
-
-const reviewSummaryOutputSchema = z.object({
-  files: z.number(),
-  additions: z.number(),
-  removals: z.number(),
 });
 
 function sendJsonRpcError(
@@ -514,105 +332,6 @@ function requestLogFields(req: Request, config: ServerConfig): Record<string, un
     referer: req.header("referer"),
     contentLength: req.header("content-length"),
   };
-}
-
-function logToolCall(config: ServerConfig, fields: ToolLogFields): void {
-  if (!config.logging.toolCalls) return;
-
-  const { command, ...safeFields } = fields;
-  logEvent(config.logging, fields.success ? "info" : "warn", "tool_call", {
-    ...safeFields,
-    commandPreview: config.logging.shellCommands && command ? commandPreview(command) : undefined,
-  });
-}
-
-function contentText(content: ToolContent[]): string {
-  return content
-    .filter(
-      (item): item is { type: "text"; text: string } => item.type === "text",
-    )
-    .map((item) => item.text)
-    .join("\n");
-}
-
-function toolErrorPreview(content: ToolContent[]): string | undefined {
-  const text = contentText(content).replace(/\s+/g, " ").trim();
-  if (!text) return undefined;
-  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
-}
-
-function logFailedToolResponse(
-  config: ServerConfig,
-  fields: Omit<ToolLogFields, "success" | "durationMs" | "error">,
-  content: ToolContent[],
-  startedAt: number,
-): void {
-  logToolCall(config, {
-    ...fields,
-    success: false,
-    durationMs: Math.round(performance.now() - startedAt),
-    error: toolErrorPreview(content),
-  });
-}
-
-function textBlock(text: string): ToolContent {
-  return { type: "text", text };
-}
-
-function textSummary(content: ToolContent[]): {
-  lines: number;
-  characters: number;
-} {
-  const text = contentText(content);
-  return {
-    lines: text.length === 0 ? 0 : text.split("\n").length,
-    characters: text.length,
-  };
-}
-
-function contentLineCount(content: string): number {
-  if (content.length === 0) return 0;
-  return content.endsWith("\n")
-    ? content.slice(0, -1).split("\n").length
-    : content.split("\n").length;
-}
-
-function countDiffStats(diff: string | undefined): DiffStats {
-  if (!diff) return { additions: 0, removals: 0 };
-
-  let additions = 0;
-  let removals = 0;
-
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) additions++;
-    if (line.startsWith("-") && !line.startsWith("---")) removals++;
-  }
-
-  return { additions, removals };
-}
-
-function newFilePatch(path: string, content: string): string {
-  const lines =
-    content.length === 0
-      ? []
-      : content.endsWith("\n")
-        ? content.slice(0, -1).split("\n")
-        : content.split("\n");
-  const hunkLength = lines.length;
-  const hunkRange = hunkLength === 0 ? "+0,0" : `+1,${hunkLength}`;
-  const body = lines.map((line) => `+${line}`).join("\n");
-
-  return [
-    `diff --git a/${path} b/${path}`,
-    "new file mode 100644",
-    "index 0000000..0000000",
-    "--- /dev/null",
-    `+++ b/${path}`,
-    `@@ -0,0 ${hunkRange} @@`,
-    body,
-  ]
-    .filter((line) => line.length > 0)
-    .join("\n");
 }
 
 function assetBaseUrl(config: ServerConfig): string {
@@ -702,237 +421,6 @@ async function assertWorkspaceAppAssets(): Promise<void> {
   }
 }
 
-function processResult(snapshot: ProcessSnapshot): string {
-  const status = snapshot.running
-    ? `Process running with session ID ${snapshot.sessionId}. Call write_stdin with this workspaceId and sessionId to continue.`
-    : snapshot.timedOut
-      ? "Process timed out."
-      : snapshot.signal
-      ? `Process exited after signal ${snapshot.signal}.`
-      : `Process exited with code ${snapshot.exitCode ?? "unknown"}.`;
-  return snapshot.output ? `${snapshot.output.replace(/\n$/, "")}\n${status}` : status;
-}
-
-function processOutputSchema(): z.ZodRawShape {
-  return resultOutputSchema({
-    sessionId: z.number().optional(),
-    running: z.boolean(),
-    exitCode: z.number().int().optional(),
-    signal: z.string().optional(),
-    timedOut: z.boolean().optional(),
-    wallTimeMs: z.number().nonnegative(),
-    outputTruncated: z.boolean(),
-  });
-}
-
-function processToolResponse(
-  tool: "bash" | "exec_command" | "write_stdin",
-  workspaceId: string,
-  snapshot: ProcessSnapshot,
-  summary: Record<string, unknown>,
-) {
-  const result = processResult(snapshot);
-  const content = [textBlock(result)];
-  const outputSummary = textSummary(snapshot.output ? [textBlock(snapshot.output)] : []);
-  return {
-    content,
-    _meta: {
-      tool,
-      card: {
-        workspaceId,
-        summary: { ...summary, ...outputSummary },
-        payload: { content },
-      },
-    },
-    structuredContent: {
-      result,
-      sessionId: snapshot.sessionId,
-      running: snapshot.running,
-      exitCode: snapshot.exitCode,
-      signal: snapshot.signal,
-      timedOut: snapshot.timedOut,
-      wallTimeMs: snapshot.wallTimeMs,
-      outputTruncated: snapshot.outputTruncated,
-    },
-  };
-}
-
-function registerCodexProcessTools(
-  server: McpServer,
-  config: ServerConfig,
-  workspaces: WorkspaceRegistry,
-  processSessions: ProcessSessionManager,
-): void {
-  registerAppTool(
-    server,
-    "exec_command",
-    {
-      title: "Execute command",
-      description:
-        `Run a command inside an open workspace. Returns its result when it exits during the yield window, otherwise returns a sessionId for write_stdin. Use this for file inspection, tests, builds, package scripts, long-running processes, and Git lifecycle writes such as git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. These Git writes are explicitly allowed when needed to complete the requested repository workflow. ${WEB_ONLY_SHELL_AGENT_POLICY} Call open_workspace first and pass workspaceId.`,
-      inputSchema: {
-        workspaceId: z.string().describe(workspaceIdDescription),
-        cmd: z.string().min(1).describe("Shell command to execute."),
-        tty: z
-          .boolean()
-          .optional()
-          .describe("Allocate a pseudo-terminal for interactive commands. Defaults to false."),
-        columns: z.number().int().min(1).max(1_000).optional().describe("Initial PTY width. Defaults to 80."),
-        rows: z.number().int().min(1).max(1_000).optional().describe("Initial PTY height. Defaults to 24."),
-        workingDirectory: z
-          .string()
-          .optional()
-          .describe("Working directory relative to the workspace root. Defaults to the workspace root."),
-        yieldTimeMs: z
-          .number()
-          .int()
-          .min(0)
-          .max(30_000)
-          .optional()
-          .describe("Milliseconds to wait before returning a running session. Defaults to 10000."),
-        timeoutMs: z
-          .number()
-          .int()
-          .min(1_000)
-          .max(3_600_000)
-          .optional()
-          .describe("Maximum total process runtime in milliseconds. Defaults to 300000."),
-        maxOutputTokens: z
-          .number()
-          .int()
-          .positive()
-          .max(100_000)
-          .optional()
-          .describe("Approximate output token budget. Defaults to 10000."),
-      },
-      outputSchema: processOutputSchema(),
-      ...toolWidgetDescriptorMeta(config, "shell"),
-      annotations: SHELL_TOOL_ANNOTATIONS,
-    },
-    async ({ workspaceId, cmd, tty, columns, rows, workingDirectory, yieldTimeMs, timeoutMs, maxOutputTokens }) => {
-      const startedAt = performance.now();
-      const violation = findWebOnlyCommandViolation(cmd);
-      if (violation) {
-        const content = [textBlock(violation)];
-        logFailedToolResponse(config, {
-          tool: "exec_command",
-          workspaceId,
-          workingDirectory: workingDirectory ?? ".",
-          command: cmd,
-          commandLength: cmd.length,
-        }, content, startedAt);
-        return {
-          isError: true,
-          content,
-          structuredContent: {
-            result: violation,
-            running: false,
-            wallTimeMs: Math.round(performance.now() - startedAt),
-            outputTruncated: false,
-          },
-        };
-      }
-
-      const workspace = workspaces.getWorkspace(workspaceId);
-      const cwd = workspaces.resolveWorkingDirectory(workspace, workingDirectory);
-      const snapshot = await processSessions.start({
-        workspaceId,
-        command: cmd,
-        cwd,
-        workspaceRoot: workspace.root,
-        tty,
-        columns,
-        rows,
-        yieldTimeMs,
-        timeoutMs: timeoutMs ?? 300_000,
-        maxOutputTokens,
-      });
-
-      logToolCall(config, {
-        tool: "exec_command",
-        workspaceId,
-        workingDirectory: workingDirectory ?? ".",
-        command: cmd,
-        commandLength: cmd.length,
-        success: true,
-        durationMs: Math.round(performance.now() - startedAt),
-      });
-
-      return processToolResponse("exec_command", workspaceId, snapshot, {
-        command: cmd,
-        workingDirectory: workingDirectory ?? ".",
-        running: snapshot.running,
-        exitCode: snapshot.exitCode,
-        timedOut: snapshot.timedOut,
-        wallTimeMs: snapshot.wallTimeMs,
-      });
-    },
-  );
-
-  registerAppTool(
-    server,
-    "write_stdin",
-    {
-      title: "Write to process",
-      description:
-        "Poll or write characters to a process returned by bash or exec_command. Omit chars or pass an empty string to poll. Pass \\u0003 to send Ctrl-C.",
-      inputSchema: {
-        workspaceId: z.string().describe("Workspace identifier used to start the process."),
-        sessionId: z.number().describe("Process session identifier returned by bash or exec_command."),
-        chars: z.string().optional().describe("Characters to write. Omit or pass an empty string to poll."),
-        columns: z.number().int().min(1).max(1_000).optional().describe("Resize a PTY to this width."),
-        rows: z.number().int().min(1).max(1_000).optional().describe("Resize a PTY to this height."),
-        yieldTimeMs: z
-          .number()
-          .int()
-          .min(0)
-          .max(30_000)
-          .optional()
-          .describe("Milliseconds to wait for process output or completion. Defaults to 10000."),
-        maxOutputTokens: z
-          .number()
-          .int()
-          .positive()
-          .max(100_000)
-          .optional()
-          .describe("Approximate output token budget. Defaults to 10000."),
-      },
-      outputSchema: processOutputSchema(),
-      ...toolWidgetDescriptorMeta(config, "shell"),
-      annotations: SHELL_TOOL_ANNOTATIONS,
-    },
-    async ({ workspaceId, sessionId, chars, columns, rows, yieldTimeMs, maxOutputTokens }) => {
-      const startedAt = performance.now();
-      workspaces.getWorkspace(workspaceId);
-      const snapshot = await processSessions.write({
-        workspaceId,
-        sessionId,
-        chars,
-        columns,
-        rows,
-        yieldTimeMs,
-        maxOutputTokens,
-      });
-
-      logToolCall(config, {
-        tool: "write_stdin",
-        workspaceId,
-        success: true,
-        durationMs: Math.round(performance.now() - startedAt),
-      });
-
-      return processToolResponse("write_stdin", workspaceId, snapshot, {
-        sessionId,
-        charactersWritten: chars?.length ?? 0,
-        running: snapshot.running,
-        exitCode: snapshot.exitCode,
-        timedOut: snapshot.timedOut,
-        wallTimeMs: snapshot.wallTimeMs,
-      });
-    },
-  );
-}
-
 export function createMcpServer(
   config: ServerConfig,
   workspaces: WorkspaceRegistry,
@@ -941,16 +429,17 @@ export function createMcpServer(
   resolveLocalAgentProviders: () => LocalAgentProviderStatus[],
   incomingArtifactAdapters: readonly IncomingArtifactAdapter[],
 ): McpServer {
+  const toolSurface = getToolSurface(config.toolMode);
   const server = new McpServer(
     {
       name: "devspace",
       title: "DevSpace",
       version: "0.1.0",
       description:
-        "Web-model-orchestrated coding tools for project workspaces. Reuse each project's workspaceId, perform work directly, and delegate only through configured DevSpace Subagents when useful.",
+        "Coding tools for project workspaces. Open each project or worktree once, then reuse its workspaceId.",
     },
     {
-      instructions: serverInstructions(config),
+      instructions: serverInstructions(config, toolSurface),
     },
   );
 
@@ -985,107 +474,36 @@ export function createMcpServer(
     },
   );
 
-  registerAppTool(
-    server,
+  server.registerTool(
     toolNames.workspaceInfo,
     {
-      title: "Workspace info",
-      description:
-        "Show the local DevSpace access summary: allowed workspace roots, public and local MCP endpoints, managed worktree directory, and example open_workspace calls. Use this when the user asks what local projects, folders, paths, or workspaces are available through DevSpace.",
+      title: "Workspace access",
+      description: "Show the local roots, MCP endpoints, managed worktree settings, and example open_workspace calls available through DevSpace.",
       inputSchema: {},
-      outputSchema: resultOutputSchema({
-        access: accessSummaryOutputSchema,
-      }),
-      ...toolWidgetDescriptorMeta(config, "workspace"),
+      outputSchema: resultOutputSchema(),
       annotations: { readOnlyHint: true },
     },
     async () => {
-      const startedAt = performance.now();
-      const access = accessSummary(config);
-      const content = [textBlock(formatAccessSummary(access))];
-
-      logToolCall(config, {
-        tool: toolNames.workspaceInfo,
-        success: true,
-        durationMs: Math.round(performance.now() - startedAt),
-      });
-
-      return {
-        content,
-        _meta: {
-          tool: toolNames.workspaceInfo,
-          card: {
-            summary: {
-              allowedRoots: access.allowedRoots.length,
-              examples: access.openWorkspaceExamples.length,
-            },
-          },
-        },
-        structuredContent: {
-          result: contentText(content),
-          access,
-        },
-      };
+      const result = formatAccessSummary(accessSummary(config));
+      return { content: [textBlock(result)], structuredContent: { result } };
     },
   );
 
-  registerAppTool(
-    server,
+  server.registerTool(
     toolNames.listProjects,
     {
       title: "List projects",
-      description:
-        `List local project/repository directories visible to DevSpace under the allowed roots: ${formatAllowedRoots(config)}. Use this first when the user asks what local projects, folders, repos, repositories, or workspaces are available, instead of guessing "~" or common home-directory paths.`,
+      description: `List project directories visible to DevSpace under: ${formatAllowedRoots(config)}. Use this before guessing local paths.`,
       inputSchema: {},
-      outputSchema: resultOutputSchema({
-        access: accessSummaryOutputSchema,
-        projects: z.array(projectCandidateOutputSchema),
-      }),
-      ...toolWidgetDescriptorMeta(config, "directory"),
+      outputSchema: resultOutputSchema({ projects: z.array(projectCandidateOutputSchema) }),
       annotations: { readOnlyHint: true },
     },
     async () => {
-      const startedAt = performance.now();
-      const access = accessSummary(config);
       const projects = await listProjectCandidates(config);
-      const projectLines = projects.length > 0
-        ? projects.map((project) => {
-            const markers = project.markers.length > 0 ? ` (${project.markers.join(", ")})` : "";
-            return `- ${project.path}${markers}`;
-          }).join("\n")
-        : "- No project directories found directly under the allowed roots.";
-      const content = [
-        textBlock([
-          formatAccessSummary(access),
-          "Project candidates directly under allowed roots:",
-          projectLines,
-          "Next step: call open_workspace with one of the listed project paths, or with an allowed root if you need a broader directory scan.",
-        ].join("\n")),
-      ];
-
-      logToolCall(config, {
-        tool: toolNames.listProjects,
-        success: true,
-        durationMs: Math.round(performance.now() - startedAt),
-      });
-
-      return {
-        content,
-        _meta: {
-          tool: toolNames.listProjects,
-          card: {
-            summary: {
-              allowedRoots: access.allowedRoots.length,
-              projects: projects.length,
-            },
-          },
-        },
-        structuredContent: {
-          result: contentText(content),
-          access,
-          projects,
-        },
-      };
+      const result = projects.length > 0
+        ? projects.map((project) => `- ${project.path}${project.markers.length ? ` (${project.markers.join(", ")})` : ""}`).join("\n")
+        : "No project directories found directly under the allowed roots.";
+      return { content: [textBlock(result)], structuredContent: { result, projects } };
     },
   );
 
@@ -1131,50 +549,34 @@ export function createMcpServer(
         agentProviders: z.array(workspaceLocalAgentProviderOutputSchema).optional(),
         agents: z.array(workspaceLocalAgentOutputSchema).optional(),
         skillDiagnostics: z.array(z.unknown()).optional(),
-        access: accessSummaryOutputSchema,
+        review: z.discriminatedUnion("available", [
+          z.object({ available: z.literal(true) }),
+          z.object({
+            available: z.literal(false),
+            reason: z.string(),
+          }),
+        ]),
         instruction: z.string(),
       },
-      ...toolWidgetDescriptorMeta(config, "workspace"),
+      ...workspaceAppDescriptorMeta(config),
       annotations: { readOnlyHint: true },
     },
     async ({ path, mode, baseRef }, { _meta }) => {
       const startedAt = performance.now();
-      let context: Awaited<ReturnType<WorkspaceRegistry["openWorkspace"]>>;
-      try {
-        context = await workspaces.openWorkspace(
-          { path, mode, baseRef },
-          { conversationScopeId: openAiConversationScopeId(_meta) },
-        );
-      } catch (error) {
-        const content = [textBlock(openWorkspaceErrorText(config, path, error, toolNames))];
-        logFailedToolResponse(config, {
-          tool: "open_workspace",
-          path,
-        }, content, startedAt);
-
-        return {
-          isError: true,
-          content,
-          structuredContent: {
-            result: contentText(content),
-            access: accessSummary(config),
-          },
-        };
-      }
-
       const {
         workspace,
         agentsFiles,
         availableAgentsFiles,
         workspaceReused,
         includeBootstrapContext,
-      } = context;
-      if (config.widgets === "changes") {
-        await reviewCheckpoints.initializeWorkspace({
-          workspaceId: workspace.id,
-          root: workspace.root,
-        });
-      }
+      } = await workspaces.openWorkspace(
+        { path, mode, baseRef },
+        { conversationScopeId: openAiConversationScopeId(_meta) },
+      );
+      const review = await reviewCheckpoints.initializeWorkspace({
+        workspaceId: workspace.id,
+        root: workspace.root,
+      });
       const cardSkills = workspace.skills
         .filter((skill) => !skill.disableModelInvocation)
         .map((skill) => ({
@@ -1203,8 +605,6 @@ export function createMcpServer(
       const cardAvailableAgentsFiles = availableAgentsFiles.map((file) => ({
         path: formatAgentsPath(file.path, workspace.root),
       }));
-      const access = accessSummary(config);
-      const accessText = formatAccessSummary(access);
       const visibleSkills = includeBootstrapContext ? cardSkills : [];
       const visibleAgentProviders = includeBootstrapContext ? cardAgentProviders : [];
       const visibleAgents = includeBootstrapContext ? cardAgents : [];
@@ -1213,7 +613,6 @@ export function createMcpServer(
       const cardInstruction = config.skillsEnabled
         ? "Use this workspaceId for subsequent work in this project. Keep reusing it while working in this project. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding."
         : "Use this workspaceId for subsequent work in this project. Keep reusing it while working in this project. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.";
-      const worktreeInstruction = `${cardInstruction} After the task is fully verified and this worktree has been committed, pushed, and merged into the source repository's current main branch, call ${toolNames.completeWorkspace} exactly once with this workspaceId. It will verify the merge, archive the worktree HEAD remotely, and remove the local worktree.`;
       const instruction = workspaceReused
         ? [
             `Workspace already open as ${workspace.id}.`,
@@ -1221,7 +620,7 @@ export function createMcpServer(
             "Keep following the project instructions, nested instruction files, skills, agent profiles, and diagnostics already provided for this workspace.",
           ].join("\n\n")
         : workspace.mode === "worktree"
-          ? worktreeInstruction
+          ? "Use this workspaceId for subsequent work in this isolated worktree. Keep reusing it while working in this worktree. Follow the project instructions, nested instruction files, skills, agent profiles, and diagnostics returned for it."
           : cardInstruction;
       const resultContent: ToolContent[] = [
         {
@@ -1237,7 +636,6 @@ export function createMcpServer(
             loadedAgentsFiles.length > 0
               ? `Loaded project instructions: ${loadedAgentsFiles.map((file) => file.path).join(", ")}`
               : undefined,
-            accessText,
             availableAgentsFileOutputs.length > 0
               ? `Available nested instructions: ${availableAgentsFileOutputs.map((file) => file.path).join(", ")}`
               : undefined,
@@ -1265,7 +663,6 @@ export function createMcpServer(
       return {
         content: resultContent,
         _meta: {
-          tool: "open_workspace",
           card: {
             workspaceId: workspace.id,
             root: workspace.root,
@@ -1280,6 +677,7 @@ export function createMcpServer(
             skills: cardSkills,
             agentProviders: cardAgentProviders,
             agents: cardAgents,
+            review,
             instruction: cardInstruction,
             summary: {
               mode: workspace.mode,
@@ -1288,8 +686,6 @@ export function createMcpServer(
               skills: cardSkills.length,
               agentProviders: cardAgentProviders.length,
               agents: cardAgents.length,
-              skillDiagnostics: workspace.skillDiagnostics.length,
-              allowedRoots: access.allowedRoots.length,
             },
           },
         },
@@ -1299,6 +695,7 @@ export function createMcpServer(
           mode: workspace.mode,
           sourceRoot: workspace.sourceRoot,
           worktree: workspace.worktree,
+          review,
           ...(includeBootstrapContext
             ? {
                 agentsFiles: loadedAgentsFiles,
@@ -1309,75 +706,41 @@ export function createMcpServer(
                 skillDiagnostics: workspace.skillDiagnostics,
               }
             : {}),
-          access,
           instruction,
         },
       };
     },
   );
 
-  registerAppTool(
-    server,
+  server.registerTool(
     toolNames.completeWorkspace,
     {
       title: "Complete workspace",
-      description:
-        "Finalize a DevSpace-managed worktree after its task is complete and merged into the source repository's current main branch. Verifies that the worktree is clean and its HEAD is contained by the source HEAD, archives the exact HEAD to the configured Git remote, verifies the remote SHA, then removes the local worktree. Call this exactly once at the end of a completed worktree workflow; never call it for unfinished or unmerged work.",
-      inputSchema: {
-        workspaceId: z.string().describe("Managed worktree workspace identifier returned by open_workspace."),
-      },
+      description: "Finalize a clean DevSpace-managed worktree after its HEAD has been merged into the source checkout. Archives the exact HEAD remotely and removes the local worktree.",
+      inputSchema: { workspaceId: z.string().describe(workspaceIdDescription) },
       outputSchema: resultOutputSchema({
+        head: z.string(),
         archiveRemote: z.string(),
         archiveRef: z.string(),
-        head: z.string(),
-        removedPath: z.string(),
       }),
-      ...toolWidgetDescriptorMeta(config, "workspace"),
-      annotations: WRITE_TOOL_ANNOTATIONS,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
     },
     async ({ workspaceId }) => {
-      const startedAt = performance.now();
-      try {
-        const archived = await workspaces.completeWorkspace(workspaceId);
-        const content = [textBlock(
-          `Completed and removed managed worktree ${archived.path}. Archived ${archived.head} to ${archived.archiveRemote}/${archived.archiveRef}.`,
-        )];
-        logToolCall(config, {
-          tool: toolNames.completeWorkspace,
-          workspaceId,
-          path: archived.path,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-        return {
-          content,
-          structuredContent: {
-            result: contentText(content),
-            archiveRemote: archived.archiveRemote,
-            archiveRef: archived.archiveRef,
-            head: archived.head,
-            removedPath: archived.path,
-          },
-        };
-      } catch (error) {
-        const content = [textBlock(
-          `Workspace completion refused: ${error instanceof Error ? error.message : String(error)}`,
-        )];
-        logFailedToolResponse(config, {
-          tool: toolNames.completeWorkspace,
-          workspaceId,
-        }, content, startedAt);
-        return {
-          isError: true,
-          content,
-          structuredContent: { result: contentText(content) },
-        };
-      }
+      const archived = await workspaces.completeWorkspace(workspaceId);
+      const result = `Archived ${archived.head} to ${archived.archiveRemote}/${archived.archiveRef} and removed ${archived.path}.`;
+      return {
+        content: [textBlock(result)],
+        structuredContent: {
+          result,
+          head: archived.head,
+          archiveRemote: archived.archiveRemote,
+          archiveRef: archived.archiveRef,
+        },
+      };
     },
   );
 
-  registerAppTool(
-    server,
+  server.registerTool(
     toolNames.read,
     {
       title: "Read file",
@@ -1416,7 +779,6 @@ export function createMcpServer(
           .describe("Maximum number of lines to read."),
       },
       outputSchema: resultOutputSchema(),
-      ...toolWidgetDescriptorMeta(config, "read"),
       annotations: { readOnlyHint: true },
     },
     async ({ workspaceId, ...input }) => {
@@ -1442,11 +804,6 @@ export function createMcpServer(
       }
       workspaces.markReadPathLoaded(workspace, readPath);
 
-      const summary = {
-        ...textSummary(response.content),
-        offset: input.offset ?? 1,
-        limited: input.limit !== undefined,
-      };
       logToolCall(config, {
         tool: toolNames.read,
         workspaceId,
@@ -1457,15 +814,6 @@ export function createMcpServer(
 
       return {
         ...response,
-        _meta: {
-          tool: toolNames.read,
-          card: {
-            workspaceId,
-            path: input.path,
-            summary,
-            payload: { content: response.content },
-          },
-        },
         structuredContent: {
           result: contentText(response.content),
         },
@@ -1473,657 +821,76 @@ export function createMcpServer(
     },
   );
 
-  const resumableBashHint = config.resumableBash
-    ? ` Commands return within ${config.resumableBashYieldMs} milliseconds when still running; call write_stdin with the returned sessionId until completion. The timeout field limits total process runtime rather than the initial HTTP request.`
-    : "";
-  if (config.toolMode !== "codex") {
-  registerAppTool(
+  toolSurface.register({
     server,
-    toolNames.write,
-    {
-      title: "Write file",
-      description:
-        `Create or completely overwrite a file in a workspace. Prefer ${toolNames.edit} for targeted changes to existing files.`,
-      inputSchema: {
-        workspaceId: z
-          .string()
-          .describe(workspaceIdDescription),
-        path: z
-          .string()
-          .describe("File path to write, relative to the workspace root."),
-        content: z.string().describe("Complete new file content."),
-      },
-      outputSchema: resultOutputSchema(),
-      ...toolWidgetDescriptorMeta(config, "write"),
-      annotations: WRITE_TOOL_ANNOTATIONS,
-    },
-    async ({ workspaceId, ...input }) => {
-      const startedAt = performance.now();
-      const workspace = workspaces.getWorkspace(workspaceId);
-      workspaces.resolvePath(workspace, input.path);
-      const response = await writeFileTool(input, {
-        cwd: workspace.root,
-        root: workspace.root,
-      });
-
-      if (response.isError) {
-        logFailedToolResponse(config, {
-          tool: toolNames.write,
-          workspaceId,
-          path: input.path,
-        }, response.content, startedAt);
-        return response;
-      }
-
-      const patch = newFilePatch(input.path, input.content);
-      const stats = countDiffStats(patch);
-      const summary = {
-        ...stats,
-        lines: contentLineCount(input.content),
-        characters: input.content.length,
-      };
-      logToolCall(config, {
-        tool: toolNames.write,
-        workspaceId,
-        path: input.path,
-        success: true,
-        durationMs: Math.round(performance.now() - startedAt),
-      });
-
-      return {
-        ...response,
-        _meta: {
-          tool: toolNames.write,
-          card: {
-            workspaceId,
-            path: input.path,
-            summary,
-            payload: {
-              content: response.content,
-              patch,
-            },
-          },
-        },
-        structuredContent: {
-          result: contentText(response.content),
-        },
-      };
-    },
-  );
+    config,
+    workspaces,
+    processSessions,
+  });
 
   registerAppTool(
     server,
-    toolNames.edit,
+    "show_changes",
     {
-      title: "Edit file",
+      title: "Show changes",
       description:
-        `Edit one file in a workspace by replacing exact text blocks. Prefer this over ${toolNames.write} for targeted changes. Each oldText must match a unique, non-overlapping region of the original file; merge nearby changes into one edit and keep oldText as small as possible while still unique.`,
+        "Show the changes made in this turn for an open workspace. Call this once after the final related file change and before your final response so the user can review the combined diff. Do not call it after each individual file change.",
       inputSchema: {
-        workspaceId: z
-          .string()
-          .describe(workspaceIdDescription),
-        path: z
-          .string()
-          .describe("File path to edit, relative to the workspace root."),
-        edits: z
-          .array(
-            z.object({
-              oldText: z
-                .string()
-                .describe(
-                  "Exact text to replace. Must match uniquely in the original file.",
-                ),
-              newText: z.string().describe("Replacement text."),
-            }),
-          )
-          .min(1),
+        workspaceId: z.string().describe(workspaceIdDescription),
       },
       outputSchema: resultOutputSchema({
-        status: z.literal("applied"),
+        workspaceId: z.string(),
+        reviewRef: z.string().regex(/^[0-9a-f]{40,64}$/),
       }),
-      ...toolWidgetDescriptorMeta(config, "edit"),
-      annotations: EDIT_TOOL_ANNOTATIONS,
+      ...workspaceAppDescriptorMeta(config),
+      annotations: { readOnlyHint: true },
     },
-    async ({ workspaceId, ...input }) => {
+    async ({ workspaceId }, { _meta }) => {
       const startedAt = performance.now();
       const workspace = workspaces.getWorkspace(workspaceId);
-      workspaces.resolvePath(workspace, input.path);
-      const response = await editFileTool(input, {
-        cwd: workspace.root,
-        root: workspace.root,
-      });
+      const reviewRef = typeof _meta?.["devspace/reviewRef"] === "string"
+        ? _meta["devspace/reviewRef"]
+        : undefined;
+      const review = reviewRef
+        ? await reviewCheckpoints.reviewByRef({
+            workspaceId,
+            root: workspace.root,
+            reviewRef,
+          })
+        : await reviewCheckpoints.reviewChanges({
+            workspaceId,
+            root: workspace.root,
+            markReviewed: true,
+          });
 
-      if (response.isError) {
-        logFailedToolResponse(config, {
-          tool: toolNames.edit,
-          workspaceId,
-          path: input.path,
-        }, response.content, startedAt);
-        return response;
-      }
-
-      const stats = countDiffStats(
-        response.details?.patch ?? response.details?.diff,
-      );
-      const summary = {
-        ...stats,
-        editCount: input.edits.length,
-      };
-      const editResultText = `Edited ${input.path} (+${stats.additions} -${stats.removals}).`;
-      const editContent = [textBlock(editResultText)];
+      const content = [textBlock(review.result)];
       logToolCall(config, {
-        tool: toolNames.edit,
+        tool: "show_changes",
         workspaceId,
-        path: input.path,
         success: true,
         durationMs: Math.round(performance.now() - startedAt),
       });
 
       return {
-        content: editContent,
+        content,
         _meta: {
-          tool: toolNames.edit,
           card: {
             workspaceId,
-            path: input.path,
-            summary,
+            summary: review.summary,
+            files: review.files,
             payload: {
-              diff: response.details?.diff,
-              patch: response.details?.patch,
+              patch: review.patch,
             },
           },
         },
         structuredContent: {
-          status: "applied",
-          result: contentText(editContent),
+          workspaceId,
+          reviewRef: review.reviewRef,
+          result: contentText(content),
         },
       };
     },
   );
-  }
-
-  if (config.toolMode === "codex") {
-    registerAppTool(
-      server,
-      "apply_patch",
-      {
-        title: "Apply patch",
-        description:
-          "Apply one Codex-style patch in a workspace. Supports adding, overwriting, updating, deleting, and moving files. Use this for all file modifications. Paths must be relative to the workspace.",
-        inputSchema: {
-          workspaceId: z
-            .string()
-            .describe(workspaceIdDescription),
-          patch: z
-            .string()
-            .describe("Patch text enclosed by *** Begin Patch and *** End Patch markers."),
-        },
-        outputSchema: resultOutputSchema({
-          additions: z.number(),
-          removals: z.number(),
-          files: z.array(
-            z.object({
-              path: z.string(),
-              previousPath: z.string().optional(),
-              operation: z.enum(["add", "update", "delete", "move"]),
-            }),
-          ),
-        }),
-        ...toolWidgetDescriptorMeta(config, "edit"),
-        annotations: EDIT_TOOL_ANNOTATIONS,
-      },
-      async ({ workspaceId, patch }) => {
-        const startedAt = performance.now();
-        const workspace = workspaces.getWorkspace(workspaceId);
-        const applied = await applyPatch(workspace.root, patch);
-        const paths = applied.files.map((file) => file.path).join(", ");
-        const result = `Applied patch to ${applied.files.length} file(s): ${paths}`;
-        const content = [textBlock(result)];
-        const displayPath = applied.files.length === 1
-          ? applied.files[0]?.path
-          : `${applied.files.length} files`;
-
-        logToolCall(config, {
-          tool: "apply_patch",
-          workspaceId,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-
-        return {
-          content,
-          _meta: {
-            tool: "apply_patch",
-            card: {
-              workspaceId,
-              path: displayPath,
-              summary: {
-                files: applied.files.length,
-                additions: applied.additions,
-                removals: applied.removals,
-              },
-              files: applied.files,
-              payload: { patch: applied.patch },
-            },
-          },
-          structuredContent: {
-            result,
-            additions: applied.additions,
-            removals: applied.removals,
-            files: applied.files,
-          },
-        };
-      },
-    );
-  }
-
-  if (config.widgets === "changes") {
-    registerAppTool(
-      server,
-      "show_changes",
-      {
-        title: "Show changes",
-        description:
-          "Show the changes made in this turn for an open workspace. Call this once after the final related file change and before your final response so the user can review the combined diff. Do not call it after each individual file change.",
-        inputSchema: {
-          workspaceId: z
-            .string()
-            .describe(workspaceIdDescription),
-        },
-        outputSchema: resultOutputSchema(),
-        ...toolWidgetDescriptorMeta(config, "show_changes"),
-        annotations: { readOnlyHint: true },
-      },
-      async ({ workspaceId }) => {
-        const startedAt = performance.now();
-        const workspace = workspaces.getWorkspace(workspaceId);
-        const review = await reviewCheckpoints.reviewChanges({
-          workspaceId,
-          root: workspace.root,
-          markReviewed: true,
-        });
-
-        const content = [textBlock(review.result)];
-        logToolCall(config, {
-          tool: "show_changes",
-          workspaceId,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-
-        return {
-          content,
-          _meta: {
-            tool: "show_changes",
-            card: {
-              workspaceId,
-              summary: review.summary,
-              files: review.files,
-              payload: {
-                patch: review.patch,
-              },
-            },
-          },
-          structuredContent: {
-            result: contentText(content),
-          },
-        };
-      },
-    );
-  }
-
-  if (config.toolMode === "full") {
-    registerAppTool(
-      server,
-      toolNames.grep,
-      {
-        title: "Grep",
-        description:
-          "Search file contents in a workspace. Use this before broad reads when looking for symbols, text, or usage sites. Respects project ignore rules.",
-        inputSchema: {
-          workspaceId: z
-            .string()
-            .describe(workspaceIdDescription),
-          pattern: z.string().describe("Search pattern."),
-          path: z
-            .string()
-            .optional()
-            .describe(
-              "Optional path or glob scope relative to the workspace root.",
-            ),
-          include: z.string().optional().describe("Optional include glob."),
-        },
-        outputSchema: resultOutputSchema(),
-        ...toolWidgetDescriptorMeta(config, "search"),
-        annotations: { readOnlyHint: true },
-      },
-      async ({ workspaceId, ...input }) => {
-        const startedAt = performance.now();
-        const workspace = workspaces.getWorkspace(workspaceId);
-        if (input.path) workspaces.resolvePath(workspace, input.path);
-        const response = await grepFilesTool(input, {
-          cwd: workspace.root,
-          root: workspace.root,
-        });
-
-        if (response.isError) {
-          logFailedToolResponse(config, {
-            tool: toolNames.grep,
-            workspaceId,
-            path: input.path,
-          }, response.content, startedAt);
-          return response;
-        }
-
-        const summary = {
-          pattern: input.pattern,
-          scope: input.path ?? ".",
-          ...textSummary(response.content),
-        };
-        logToolCall(config, {
-          tool: toolNames.grep,
-          workspaceId,
-          path: input.path,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-
-        return {
-          ...response,
-          _meta: {
-            tool: toolNames.grep,
-            card: {
-              workspaceId,
-              path: input.path,
-              summary,
-              payload: { content: response.content },
-            },
-          },
-          structuredContent: {
-            result: contentText(response.content),
-          },
-        };
-      },
-    );
-
-    registerAppTool(
-      server,
-      toolNames.glob,
-      {
-        title: "Glob",
-        description:
-          "Find files by glob pattern in a workspace. Use this to discover filenames or narrow file sets before reading. Respects project ignore rules.",
-        inputSchema: {
-          workspaceId: z
-            .string()
-            .describe(workspaceIdDescription),
-          pattern: z.string().describe("File glob pattern."),
-          path: z
-            .string()
-            .optional()
-            .describe("Optional path scope relative to the workspace root."),
-        },
-        outputSchema: resultOutputSchema(),
-        ...toolWidgetDescriptorMeta(config, "search"),
-        annotations: { readOnlyHint: true },
-      },
-      async ({ workspaceId, ...input }) => {
-        const startedAt = performance.now();
-        const workspace = workspaces.getWorkspace(workspaceId);
-        if (input.path) workspaces.resolvePath(workspace, input.path);
-        const response = await findFilesTool(input, {
-          cwd: workspace.root,
-          root: workspace.root,
-        });
-
-        if (response.isError) {
-          logFailedToolResponse(config, {
-            tool: toolNames.glob,
-            workspaceId,
-            path: input.path,
-          }, response.content, startedAt);
-          return response;
-        }
-
-        const summary = {
-          pattern: input.pattern,
-          scope: input.path ?? ".",
-          ...textSummary(response.content),
-        };
-        logToolCall(config, {
-          tool: toolNames.glob,
-          workspaceId,
-          path: input.path,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-
-        return {
-          ...response,
-          _meta: {
-            tool: toolNames.glob,
-            card: {
-              workspaceId,
-              path: input.path,
-              summary,
-              payload: { content: response.content },
-            },
-          },
-          structuredContent: {
-            result: contentText(response.content),
-          },
-        };
-      },
-    );
-
-    registerAppTool(
-      server,
-      toolNames.ls,
-      {
-        title: "Ls",
-        description:
-          "List a directory in a workspace. Use this for directory inspection before reading files.",
-        inputSchema: {
-          workspaceId: z
-            .string()
-            .describe(workspaceIdDescription),
-          path: z
-            .string()
-            .describe(
-              "Directory path to list, relative to the workspace root.",
-            ),
-        },
-        outputSchema: resultOutputSchema(),
-        ...toolWidgetDescriptorMeta(config, "directory"),
-        annotations: { readOnlyHint: true },
-      },
-      async ({ workspaceId, ...input }) => {
-        const startedAt = performance.now();
-        const workspace = workspaces.getWorkspace(workspaceId);
-        workspaces.resolvePath(workspace, input.path);
-        const response = await listDirectoryTool(input, {
-          cwd: workspace.root,
-          root: workspace.root,
-        });
-
-        if (response.isError) {
-          logFailedToolResponse(config, {
-            tool: toolNames.ls,
-            workspaceId,
-            path: input.path,
-          }, response.content, startedAt);
-          return response;
-        }
-
-        const summary = textSummary(response.content);
-        logToolCall(config, {
-          tool: toolNames.ls,
-          workspaceId,
-          path: input.path,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-
-        return {
-          ...response,
-          _meta: {
-            tool: toolNames.ls,
-            card: {
-              workspaceId,
-              path: input.path,
-              summary,
-              payload: { content: response.content },
-            },
-          },
-          structuredContent: {
-            result: contentText(response.content),
-          },
-        };
-      },
-    );
-  }
-
-  if (config.toolMode !== "codex") {
-  registerAppTool(
-    server,
-    toolNames.shell,
-    {
-      title: "Bash",
-      description: config.toolMode !== "full"
-        ? `Run a shell command inside an open workspace. Use this for tests, builds, package scripts, search, file discovery, directory inspection, and Git lifecycle commands including git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. These Git writes are explicitly allowed when needed to complete the requested repository workflow; do not describe Git as inspection-only. In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use command-line tools such as grep, rg, find, ls, and tree for inspection. Outside Git operations, do not use ${toolNames.shell} to create or modify ordinary project files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read} for direct file reads.${resumableBashHint} ${WEB_ONLY_SHELL_AGENT_POLICY} Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`
-        : `Run a shell command inside an open workspace. Use this for tests, builds, package scripts, commands that are better executed by the shell, and Git lifecycle commands including git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag. These Git writes are explicitly allowed when needed to complete the requested repository workflow; do not describe Git as inspection-only. Outside Git operations, do not use ${toolNames.shell} to create or modify ordinary project files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection.${resumableBashHint} ${WEB_ONLY_SHELL_AGENT_POLICY} Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.`,
-      inputSchema: {
-        workspaceId: z
-          .string()
-          .describe(workspaceIdDescription),
-        command: z
-          .string()
-          .describe(
-            `Shell command to run. Git lifecycle writes are allowed; for ordinary project-file changes use ${toolNames.edit} or ${toolNames.write}.`,
-          ),
-        workingDirectory: z
-          .string()
-          .optional()
-          .describe(
-            "Optional working directory relative to the workspace root. Defaults to the workspace root.",
-          ),
-        timeout: z
-          .number()
-          .positive()
-          .max(300)
-          .optional()
-          .describe("Timeout in seconds. Defaults to 30, max 300."),
-      },
-      outputSchema: config.resumableBash ? processOutputSchema() : resultOutputSchema(),
-      ...toolWidgetDescriptorMeta(config, "shell"),
-      annotations: SHELL_TOOL_ANNOTATIONS,
-    },
-    async ({ workspaceId, workingDirectory, ...input }) => {
-      const startedAt = performance.now();
-      const violation = findWebOnlyCommandViolation(input.command);
-      if (violation) {
-        const content = [textBlock(violation)];
-        logFailedToolResponse(config, {
-          tool: toolNames.shell,
-          workspaceId,
-          workingDirectory: workingDirectory ?? ".",
-          command: input.command,
-          commandLength: input.command.length,
-        }, content, startedAt);
-        return {
-          isError: true,
-          content,
-          structuredContent: {
-            result: violation,
-          },
-        };
-      }
-
-      const workspace = workspaces.getWorkspace(workspaceId);
-      const cwd = workspaces.resolveWorkingDirectory(
-        workspace,
-        workingDirectory,
-      );
-      if (config.resumableBash) {
-        const snapshot = await processSessions.start({
-          workspaceId,
-          command: input.command,
-          cwd,
-          workspaceRoot: workspace.root,
-          yieldTimeMs: config.resumableBashYieldMs,
-          timeoutMs: (input.timeout ?? 30) * 1_000,
-        });
-        logToolCall(config, {
-          tool: toolNames.shell,
-          workspaceId,
-          workingDirectory: workingDirectory ?? ".",
-          command: input.command,
-          commandLength: input.command.length,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-        return processToolResponse(toolNames.shell, workspaceId, snapshot, {
-          command: input.command,
-          workingDirectory: workingDirectory ?? ".",
-          running: snapshot.running,
-          exitCode: snapshot.exitCode,
-          timedOut: snapshot.timedOut,
-          wallTimeMs: snapshot.wallTimeMs,
-        });
-      }
-      const response = await runShellTool(input, {
-        cwd,
-        root: workspace.root,
-      });
-
-      if (response.isError) {
-        logFailedToolResponse(config, {
-          tool: toolNames.shell,
-          workspaceId,
-          workingDirectory: workingDirectory ?? ".",
-          command: input.command,
-          commandLength: input.command.length,
-        }, response.content, startedAt);
-        return response;
-      }
-
-      const summary = {
-        command: input.command,
-        workingDirectory: workingDirectory ?? ".",
-        ...textSummary(response.content),
-      };
-      logToolCall(config, {
-        tool: toolNames.shell,
-        workspaceId,
-        workingDirectory: workingDirectory ?? ".",
-        command: input.command,
-        commandLength: input.command.length,
-        success: true,
-        durationMs: Math.round(performance.now() - startedAt),
-      });
-
-      return {
-        ...response,
-        _meta: {
-          tool: toolNames.shell,
-          card: {
-            workspaceId,
-            path: workingDirectory,
-            summary,
-            payload: { content: response.content },
-          },
-        },
-        structuredContent: {
-          result: contentText(response.content),
-        },
-      };
-    },
-  );
-  }
-
-  if (config.toolMode === "codex" || config.resumableBash) {
-    registerCodexProcessTools(server, config, workspaces, processSessions);
-  }
 
   if (config.artifactsEnabled && isArtifactDownloadSupportedPlatform()) {
     registerArtifactTools(server, {
@@ -2194,7 +961,7 @@ export function createServer(
   });
 
   const logSessionCloseResults = (
-    reason: "idle_timeout" | "server_shutdown",
+    reason: "idle_timeout" | "capacity_limit" | "server_shutdown",
     results: McpSessionCloseResult[],
   ) => {
     for (const result of results) {
@@ -2219,13 +986,13 @@ export function createServer(
 
   const sessionCleanupTimer = setInterval(() => {
     void transports
-      .closeIdle(MCP_SESSION_IDLE_TIMEOUT_MS)
+      .closeIdle(config.mcpSessionIdleTimeoutMs)
       .then((results) => logSessionCloseResults("idle_timeout", results));
-  }, MCP_SESSION_CLEANUP_INTERVAL_MS);
+  }, config.mcpSessionCleanupIntervalMs);
   sessionCleanupTimer.unref();
 
   if (config.logging.trustProxy) {
-    app.set("trust proxy", "loopback");
+    app.set("trust proxy", true);
   }
 
   app.use((req, res, next) => {
@@ -2327,7 +1094,12 @@ export function createServer(
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (newSessionId) => {
-            if (transport) transports.register(newSessionId, transport);
+            if (transport) {
+              transports.register(newSessionId, transport);
+              void transports
+                .closeOverflow(config.mcpSessionMaxCount)
+                .then((results) => logSessionCloseResults("capacity_limit", results));
+            }
             logEvent(config.logging, "info", "mcp_session_created", {
               requestId,
               sessionIdPrefix: sessionIdPrefix(newSessionId),

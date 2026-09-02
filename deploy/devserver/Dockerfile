@@ -6,12 +6,14 @@ FROM node:26.3.0-bookworm AS build
 
 WORKDIR /opt/devspace
 
-COPY package.json package-lock.json ./
+RUN npm install --global pnpm@11.25.0
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY scripts ./scripts
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN npm run build && npm prune --omit=dev
+RUN pnpm build && pnpm prune --prod
 
 FROM node:26.3.0-bookworm
 
@@ -90,7 +92,8 @@ COPY --from=go-toolchain /usr/local/go /usr/local/go
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/package.json /opt/devspace/package.json
-COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/package-lock.json /opt/devspace/package-lock.json
+COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/pnpm-lock.yaml /opt/devspace/pnpm-lock.yaml
+COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/pnpm-workspace.yaml /opt/devspace/pnpm-workspace.yaml
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/node_modules /opt/devspace/node_modules
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/dist /opt/devspace/dist
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/skills /opt/devspace/skills
@@ -104,7 +107,7 @@ LABEL org.opencontainers.image.source="https://github.com/Ciward/devspace" \
       org.opencontainers.image.title="DevServer" \
       org.opencontainers.image.description="Web-orchestrated DevSpace Docker development environment"
 
-RUN npm install --global @openai/codex@0.149.1 pnpm@10.23.0 yarn@1.22.22
+RUN npm install --global @openai/codex@0.149.1 pnpm@11.25.0 yarn@1.22.22
 
 WORKDIR /home/ubuntu/work
 USER ubuntu

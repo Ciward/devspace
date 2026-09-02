@@ -412,6 +412,35 @@ await waitFor(() => getRecord(defect.id).status === "error");
 assert.equal(getRecord(defect.id).errorCode, "AGENT_INTERNAL_ERROR");
 assert.notEqual(getRecord(defect.id).errorCode, "PROVIDER_EXECUTION_ERROR");
 
+const limitedStore = new LocalAgentStore(join(root, "limited-state"));
+const limitedManager = new LocalAgentManager({
+  store: limitedStore,
+  drivers: [driver],
+  pool: new LocalAgentRuntimePool(),
+  loadProfiles: async () => [profile],
+  allowedRoots: [root],
+  subagents,
+  maxConcurrentTurns: 1,
+} as unknown as ConstructorParameters<typeof LocalAgentManager>[0]);
+const limitedFirst = unwrap(await limitedManager.start({
+  target: "reviewer",
+  prompt: "hold limited first",
+  workspaceId: scope.workspaceId,
+  workspaceRoot: root,
+}));
+await waitFor(() => runtimes.get(limitedFirst.id)?.inputs.length === 1);
+const limitedSecond = unwrap(await limitedManager.start({
+  target: "reviewer",
+  prompt: "limited second",
+  workspaceId: scope.workspaceId,
+  workspaceRoot: root,
+}));
+await new Promise<void>((resolve) => setImmediate(resolve));
+assert.equal(runtimes.has(limitedSecond.id), false, "second turn should wait for a concurrency slot");
+runtimes.get(limitedFirst.id)!.release();
+await waitFor(() => limitedStore.get(limitedSecond.id)?.status === "idle");
+await limitedManager.close();
+
 const shuttingDown = unwrap(await manager.start({
   target: "reviewer",
   prompt: "hold during shutdown",

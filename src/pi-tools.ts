@@ -100,21 +100,18 @@ export async function editFileTool(input: EditToolInput, context: ToolContext): 
 export async function grepFilesTool(input: GrepToolInput, context: ToolContext): Promise<ToolResponse> {
   if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
   const tool = createGrepTool(context.cwd);
-
   return runTool((params) => tool.execute("grep_files", params), input, context);
 }
 
 export async function findFilesTool(input: FindToolInput, context: ToolContext): Promise<ToolResponse> {
   if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
   const tool = createFindTool(context.cwd);
-
   return runTool((params) => tool.execute("find_files", params), input, context);
 }
 
 export async function listDirectoryTool(input: LsToolInput, context: ToolContext): Promise<ToolResponse> {
   if (input.path) resolveAllowedPath(input.path, context.cwd, [context.root]);
   const tool = createLsTool(context.cwd);
-
   return runTool((params) => tool.execute("list_directory", params), input, context);
 }
 

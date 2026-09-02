@@ -10,9 +10,14 @@ readonly DEVSERVER_HOME="${DEVSERVER_HOME:-/home/ubuntu/.devserver/home}"
 readonly CODEX_DIR="${DEVSERVER_HOME}/.codex"
 readonly CODEX_CONFIG="${CODEX_DIR}/config.toml"
 readonly CODEX_AUTH="${CODEX_DIR}/auth.json"
+readonly MAX_CONCURRENT_THREADS="${DEVSERVER_CODEX_MAX_CONCURRENT_THREADS:-2}"
 
 if [[ ! "$KEY_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
   printf 'Invalid TokenLab API key name\n' >&2
+  exit 2
+fi
+if [[ ! "$MAX_CONCURRENT_THREADS" =~ ^[1-9][0-9]*$ ]] || (( MAX_CONCURRENT_THREADS > 32 )); then
+  printf 'DEVSERVER_CODEX_MAX_CONCURRENT_THREADS must be between 1 and 32\n' >&2
   exit 2
 fi
 
@@ -69,7 +74,7 @@ trap 'rm -f "$config_tmp" "$auth_tmp"' EXIT
   printf 'default_subagent_model = "gpt-5.6-luna"\n'
   printf 'default_subagent_reasoning_effort = "max"\n\n'
   printf '[agents]\n'
-  printf 'max_concurrent_threads_per_session = 6\n\n'
+  printf 'max_concurrent_threads_per_session = %s\n\n' "$MAX_CONCURRENT_THREADS"
   printf '[features]\n'
   printf 'hooks = true\n'
   printf 'memories = true\n'

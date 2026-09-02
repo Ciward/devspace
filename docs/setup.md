@@ -56,7 +56,7 @@ remain limited to the roots configured for ChatGPT.
 
 Setup detects supported Coding Agents and asks which ones DevSpace may use.
 These choices are stored as provider objects under `subagents` in
-`~/.devspace/config.json`.
+`~/.devspace/config.jsonc`.
 
 If you selected Coding Agents, setup prints:
 
@@ -76,6 +76,16 @@ reverse proxy first and point it at:
 ```text
 http://127.0.0.1:7676
 ```
+
+For Tailscale Funnel, proxy the whole DevSpace server from the root path:
+
+```bash
+tailscale funnel --bg 7676
+```
+
+Do not mount Funnel only at `/mcp` with `--set-path=/mcp`. DevSpace also serves
+OAuth discovery and authorization routes outside `/mcp`, and a path mount can
+strip `/mcp` before the request reaches DevSpace.
 
 Enter the public origin without `/mcp`:
 
@@ -99,13 +109,7 @@ Run:
 npx @waishnav/devspace serve
 ```
 
-If your tunnel URL changes for one run, override it without rewriting config:
-
-```bash
-DEVSPACE_PUBLIC_BASE_URL="https://new-tunnel.example.com" npx @waishnav/devspace serve
-```
-
-For a stable public URL, persist it:
+If your tunnel URL changes, update the persisted value before starting:
 
 ```bash
 npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
@@ -120,7 +124,7 @@ password approval page. Enter the Owner password printed during setup.
 The default config files are:
 
 ```text
-~/.devspace/config.json
+~/.devspace/config.jsonc
 ~/.devspace/auth.json
 ```
 
@@ -141,9 +145,12 @@ Git, Bash, public URL, allowed hosts, and SQLite native dependency status.
 
 If you are developing DevSpace itself instead of using the published package:
 
+Local checkout development additionally requires pnpm 11.25.0, the version
+pinned in `package.json`. Install it with `npm install --global pnpm@11.25.0`.
+
 ```bash
-npm install --include=dev
-npm run dev
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
 The same setup rules apply.

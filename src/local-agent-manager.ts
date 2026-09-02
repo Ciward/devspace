@@ -68,6 +68,7 @@ export interface LocalAgentManagerOptions {
   allowedRoots?: readonly string[];
   logger?: LocalAgentManagerLogger;
   subagents: SubagentsConfig;
+  maxConcurrentTurns?: number;
 }
 
 export type AgentStartError = AgentTargetError | AgentScopeError | AgentConflictError | AgentStoreError;
@@ -89,7 +90,10 @@ export class LocalAgentManager {
   private readonly allowedRoots?: readonly string[];
   private readonly logger?: LocalAgentManagerLogger;
   private readonly subagents: SubagentsConfig;
+  private readonly maxConcurrentTurns: number;
   private readonly activeTurns = new Map<string, Promise<void>>();
+  private readonly turnWaiters: Array<(acquired: boolean) => void> = [];
+  private runningTurnCount = 0;
   private accepting = true;
   private closePromise?: Promise<void>;
 
@@ -102,6 +106,10 @@ export class LocalAgentManager {
     this.allowedRoots = options.allowedRoots;
     this.logger = options.logger;
     this.subagents = options.subagents;
+    this.maxConcurrentTurns = options.maxConcurrentTurns ?? 4;
+    if (!Number.isInteger(this.maxConcurrentTurns) || this.maxConcurrentTurns < 1) {
+      throw new Error("Subagent concurrency must be a positive integer.");
+    }
   }
 
   reconcileActiveRuns(message?: string): BetterResult<number, AgentStoreError> {
@@ -224,6 +232,7 @@ export class LocalAgentManager {
   async close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.accepting = false;
+    for (const resolveWaiter of this.turnWaiters.splice(0)) resolveWaiter(false);
     const turns = Array.from(this.activeTurns.values());
     this.closePromise = (async () => {
       // Closing pooled runtimes is what interrupts provider turns. Waiting for
@@ -294,6 +303,11 @@ export class LocalAgentManager {
     overrides: RunOverrides,
     workspaceId?: string,
   ): Promise<void> {
+    const acquired = await this.acquireTurnSlot(record);
+    if (!acquired) {
+      this.activeTurns.delete(record.id);
+      return;
+    }
     const startedAt = Date.now();
     this.log("info", "agent_run_started", {
       provider: record.provider,
@@ -395,7 +409,39 @@ export class LocalAgentManager {
       });
       throw error;
     } finally {
+      this.releaseTurnSlot();
       this.activeTurns.delete(record.id);
+    }
+  }
+
+  private acquireTurnSlot(record: LocalAgentRecord): Promise<boolean> {
+    if (!this.accepting) return Promise.resolve(false);
+    if (this.runningTurnCount < this.maxConcurrentTurns) {
+      this.runningTurnCount += 1;
+      return Promise.resolve(true);
+    }
+
+    this.log("info", "agent_run_queued", {
+      provider: record.provider,
+      agentId: record.id,
+      runningTurns: this.runningTurnCount,
+      queuedTurns: this.turnWaiters.length + 1,
+      maxConcurrentTurns: this.maxConcurrentTurns,
+    });
+    return new Promise<boolean>((resolve) => this.turnWaiters.push(resolve));
+  }
+
+  private releaseTurnSlot(): void {
+    this.runningTurnCount = Math.max(0, this.runningTurnCount - 1);
+    while (this.turnWaiters.length > 0) {
+      const resolveWaiter = this.turnWaiters.shift()!;
+      if (!this.accepting) {
+        resolveWaiter(false);
+        continue;
+      }
+      this.runningTurnCount += 1;
+      resolveWaiter(true);
+      break;
     }
   }
 

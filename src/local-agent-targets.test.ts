@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  formatAvailableLocalAgentTargets,
   parseLocalAgentRunArgs,
   resolveLocalAgentTarget,
 } from "./local-agent-targets.js";
@@ -196,5 +195,3 @@ assert.deepEqual(parseLocalAgentRunArgs(["codex", "--", "--json", "literal"]), {
 }
 
 assert.equal(resolveLocalAgentTarget("missing", profiles), undefined);
-assert.match(formatAvailableLocalAgentTargets(profiles), /profiles: reviewer, claude/);
-assert.match(formatAvailableLocalAgentTargets([]), /providers: codex, claude, opencode, pi, cursor, copilot, grok/);

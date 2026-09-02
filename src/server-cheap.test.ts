@@ -15,18 +15,22 @@ import {
 } from "./server.js";
 
 const config: ServerConfig = {
+  configDir: "/Users/alice/.devspace",
   host: "127.0.0.1",
   port: 7676,
   publicBaseUrl: "https://devspace.example.com",
+  mcpSessionIdleTimeoutMs: 300_000,
+  mcpSessionCleanupIntervalMs: 30_000,
+  mcpSessionMaxCount: 128,
   allowedRoots: [
     "/Users/alice/work",
     "/Users/alice/personal/open-source",
   ],
   allowedHosts: ["localhost", "127.0.0.1", "::1", "devspace.example.com"],
-  toolMode: "minimal",
+  toolMode: "full",
   resumableBash: false,
   resumableBashYieldMs: 10_000,
-  widgets: "full",
+  uiEnabled: true,
   stateDir: "/Users/alice/.local/share/devspace",
   worktreeRoot: "/Users/alice/.devspace/worktrees",
   worktreeMaxCount: 10,
@@ -38,6 +42,7 @@ const config: ServerConfig = {
   devspaceSkillsDir: "/Users/alice/.devspace/skills",
   devspaceAgentsDir: "/Users/alice/.devspace/agents",
   subagents: { enabled: false, providers: [] },
+  subagentMaxConcurrentTurns: 2,
   agentDir: "/Users/alice/.codex",
   logging: {
     level: "info",
@@ -135,7 +140,7 @@ const proxiedServer = createServer({
   },
 });
 try {
-  assert.equal(proxiedServer.app.get("trust proxy"), "loopback");
+  assert.equal(proxiedServer.app.get("trust proxy"), true);
 } finally {
   await proxiedServer.close();
 }

@@ -7,7 +7,7 @@ import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { loadConfig, type ServerConfig } from "./config.js";
+import { loadConfig, type ServerConfig, type ToolMode } from "./config.js";
 import type { LocalAgentProviderAvailability } from "./local-agent-availability.js";
 import { buildLocalAgentProviderStatuses } from "./local-agent-catalog.js";
 import type { SubagentsConfig } from "./local-agent-config.js";
@@ -16,92 +16,157 @@ import { ProcessSessionManager } from "./process-sessions.js";
 import { createMcpServer } from "./server.js";
 import { SqliteWorkspaceStore } from "./workspace-store.js";
 import { WorkspaceRegistry } from "./workspaces.js";
+import { writeTestDevspaceConfig } from "./test-support/config.test.js";
 
 const execFileAsync = promisify(execFile);
 
-test("bash tool description explicitly allows configured DevSpace subagents", async (t) => {
-  const context = await fixture(t, {
-    localAgentProviders: [{ name: "codex", available: true }],
-  });
-  const tools = await context.client.listTools();
-  const bashTool = tools.tools.find((tool) => tool.name === "bash");
-  assert.ok(bashTool?.description);
-  assert.match(bashTool.description, /Direct local agent CLIs.*blocked by the web-only policy/i);
-  assert.match(bashTool.description, /`devspace agents run`/);
-  assert.match(bashTool.description, /Do not reject those allowed `devspace agents` commands/i);
-  assert.doesNotMatch(
-    bashTool.description,
-    /Local agent and subagent commands are blocked by the web-only policy/i,
-  );
-});
+test("tool modes expose the expected host-facing tool surface", async (t) => {
+  const cases: Array<{
+    mode: ToolMode;
+    expected: string[];
+  }> = [
+    {
+      mode: "claude",
+      expected: ["workspace_info", "list_projects", "open_workspace", "complete_workspace", "read", "write", "edit", "bash", "show_changes"],
+    },
+    {
+      mode: "codex",
+      expected: ["workspace_info", "list_projects", "open_workspace", "complete_workspace", "read", "apply_patch", "exec_command", "write_stdin", "show_changes"],
+    },
+    {
+      mode: "full",
+      expected: ["workspace_info", "list_projects", "open_workspace", "complete_workspace", "read", "write", "edit", "grep", "glob", "ls", "bash", "apply_patch", "exec_command", "write_stdin", "show_changes"],
+    },
+  ];
 
-test("full mode can keep legacy tools while bash continues through write_stdin", async (t) => {
-  const context = await fixture(t, { resumableBash: true, resumableBashYieldMs: 10 });
-  const tools = await context.client.listTools();
-  const names = new Set(tools.tools.map((tool) => tool.name));
-  for (const name of [
-    "write",
-    "edit",
-    "grep",
-    "glob",
-    "ls",
-    "bash",
-    "exec_command",
-    "write_stdin",
-  ]) {
-    assert.equal(names.has(name), true, `expected full resumable tool ${name}`);
+  for (const { mode, expected } of cases) {
+    await t.test(mode, async (nested) => {
+      const context = await fixture(nested, { toolMode: mode, uiEnabled: false });
+      const tools = await context.client.listTools();
+
+      assert.deepEqual(
+        tools.tools.map((tool) => tool.name).sort(),
+        expected.sort(),
+      );
+    });
   }
-
-  const opened = await callOpen(context.client, context.project, "chat-resumable");
-  const workspaceId = structuredContent(opened).workspaceId as string;
-  const started = await context.client.callTool({
-    name: "bash",
-    arguments: {
-      workspaceId,
-      command: "node -e \"setTimeout(() => process.stdout.write('resumed-ok'), 100)\"",
-      timeout: 2,
-    },
-  });
-  const startedContent = structuredContent(started);
-  assert.equal(startedContent.running, true);
-  assert.equal(typeof startedContent.sessionId, "number");
-  assert.equal((started._meta as Record<string, unknown>).tool, "bash");
-
-  const completed = await context.client.callTool({
-    name: "write_stdin",
-    arguments: {
-      workspaceId,
-      sessionId: startedContent.sessionId,
-      yieldTimeMs: 1_000,
-    },
-  });
-  assert.match(responseText(completed), /resumed-ok/);
-  assert.equal(structuredContent(completed).running, false);
-  assert.equal(structuredContent(completed).exitCode, 0);
 });
 
-test("resumable bash enforces its total process timeout", async (t) => {
-  const context = await fixture(t, { resumableBash: true, resumableBashYieldMs: 10 });
-  const opened = await callOpen(context.client, context.project, "chat-timeout");
-  const workspaceId = structuredContent(opened).workspaceId as string;
-  const started = await context.client.callTool({
-    name: "bash",
-    arguments: {
-      workspaceId,
-      command: "node -e \"setTimeout(() => {}, 5000)\"",
-      timeout: 0.05,
-    },
-  });
-  const sessionId = structuredContent(started).sessionId;
-  assert.equal(typeof sessionId, "number");
+test("UI metadata is limited to workspace and aggregate review", async (t) => {
+  for (const uiEnabled of [true, false]) {
+    await t.test(uiEnabled ? "enabled" : "disabled", async (nested) => {
+      const context = await fixture(nested, { toolMode: "claude", uiEnabled });
+      const tools = await context.client.listTools();
+      const toolsWithUi = tools.tools
+        .filter((tool) => Boolean((tool._meta as { ui?: unknown } | undefined)?.ui))
+        .map((tool) => tool.name)
+        .sort();
 
-  const completed = await context.client.callTool({
-    name: "write_stdin",
-    arguments: { workspaceId, sessionId, yieldTimeMs: 1_000 },
+      assert.deepEqual(toolsWithUi, uiEnabled ? ["open_workspace", "show_changes"] : []);
+    });
+  }
+});
+
+test("open_workspace reports aggregate review availability", async (t) => {
+  const plain = await fixture(t);
+  const gitWorkspace = await fixture(t, { git: true });
+
+  const plainReview = structuredContent(await callOpen(plain.client, plain.project, "plain")).review;
+  const gitReview = structuredContent(await callOpen(gitWorkspace.client, gitWorkspace.project, "git")).review;
+
+  assert.equal((plainReview as { available: boolean }).available, false);
+  assert.deepEqual(gitReview, { available: true });
+});
+
+test("show_changes keeps model output compact and preserves the rich review card", async (t) => {
+  const context = await fixture(t, { git: true, uiEnabled: false });
+  const opened = structuredContent(
+    await callOpen(context.client, context.project, "review"),
+  );
+  const workspaceId = opened.workspaceId;
+  assert.equal(typeof workspaceId, "string");
+
+  await writeFile(join(context.project, "README.md"), "goodbye\n");
+  const review = await context.client.callTool({
+    name: "show_changes",
+    arguments: { workspaceId },
   });
-  assert.equal(structuredContent(completed).running, false);
-  assert.equal(structuredContent(completed).timedOut, true);
-  assert.match(responseText(completed), /timed out/i);
+  const structured = structuredContent(review);
+  assert.equal((review._meta as Record<string, unknown> | undefined)?.tool, undefined);
+
+  assert.equal(structured.workspaceId, workspaceId);
+  assert.match(structured.reviewRef as string, /^[0-9a-f]{40,64}$/);
+  assert.equal("summary" in structured, false);
+  assert.equal("files" in structured, false);
+  assert.equal("patch" in structured, false);
+
+  const card = responseCard(review);
+  assert.deepEqual(card.summary, {
+    files: 1,
+    additions: 1,
+    removals: 1,
+  });
+  assert.deepEqual(card.files, [
+    {
+      path: "README.md",
+      type: "change",
+      additions: 1,
+      removals: 1,
+    },
+  ]);
+  assert.match(
+    ((card.payload as { patch?: string } | undefined)?.patch) ?? "",
+    /-hello\n\+goodbye/,
+  );
+
+  const tools = await context.client.listTools();
+  const outputProperties = tools.tools.find((tool) => tool.name === "show_changes")
+    ?.outputSchema?.properties;
+  assert.ok(outputProperties && "workspaceId" in outputProperties);
+  assert.ok(outputProperties && "reviewRef" in outputProperties);
+  assert.equal(outputProperties && "summary" in outputProperties, false);
+  assert.equal(outputProperties && "files" in outputProperties, false);
+  assert.equal(outputProperties && "patch" in outputProperties, false);
+  const inputProperties = tools.tools.find((tool) => tool.name === "show_changes")
+    ?.inputSchema?.properties;
+  assert.equal(inputProperties && "reviewRef" in inputProperties, false);
+});
+
+test("show_changes can reopen a historical review without advancing the checkpoint", async (t) => {
+  const context = await fixture(t, { git: true });
+  const workspaceId = structuredContent(
+    await callOpen(context.client, context.project, "review-history"),
+  ).workspaceId;
+  assert.equal(typeof workspaceId, "string");
+
+  await writeFile(join(context.project, "README.md"), "first\n");
+  const first = structuredContent(await context.client.callTool({
+    name: "show_changes",
+    arguments: { workspaceId },
+  }));
+  const reviewRef = first.reviewRef;
+  assert.equal(typeof reviewRef, "string");
+
+  await writeFile(join(context.project, "README.md"), "second\n");
+  const reopened = await context.client.callTool({
+    name: "show_changes",
+    arguments: { workspaceId },
+    _meta: { "devspace/reviewRef": reviewRef },
+  } as Parameters<Client["callTool"]>[0]);
+  assert.equal(structuredContent(reopened).reviewRef, reviewRef);
+  assert.match(
+    (((responseCard(reopened).payload as { patch?: string } | undefined)?.patch) ?? ""),
+    /\+first/,
+  );
+
+  const current = await context.client.callTool({
+    name: "show_changes",
+    arguments: { workspaceId },
+  });
+  assert.match(
+    (((responseCard(current).payload as { patch?: string } | undefined)?.patch) ?? ""),
+    /-first\n\+second/,
+  );
 });
 
 test("open_workspace keeps lifecycle flags out of model output and preserves complete card metadata", async (t) => {
@@ -111,6 +176,8 @@ test("open_workspace keeps lifecycle flags out of model output and preserves com
   });
   const first = await callOpen(context.client, context.project, "chat-1");
   const repeated = await callOpen(context.client, context.project, "chat-1");
+  assert.equal((first._meta as Record<string, unknown> | undefined)?.tool, undefined);
+  assert.equal((repeated._meta as Record<string, unknown> | undefined)?.tool, undefined);
 
   const tools = await context.client.listTools();
   const openTool = tools.tools.find((tool) => tool.name === "open_workspace");
@@ -209,121 +276,24 @@ test("open_workspace omits providers disabled by configuration", async (t) => {
   );
 });
 
-test("concurrent checkout opens return one full context and one reuse instruction", async (t) => {
-  const context = await fixture(t);
-  const [first, second] = await Promise.all([
-    callOpen(context.client, context.project, "chat-1"),
-    callOpen(context.client, context.project, "chat-1"),
-  ]);
-
-  assert.equal(structuredContent(first).workspaceId, structuredContent(second).workspaceId);
-  assert.equal(
-    [first, second].filter((result) => Array.isArray(structuredContent(result).agentsFiles)).length,
-    1,
-  );
-  assert.equal(
-    [first, second].filter((result) => responseText(result).includes("Workspace already open as")).length,
-    1,
-  );
-});
-
-test("new worktrees always receive a fresh workspace and complete worktree context", async (t) => {
-  const context = await fixture(t, { git: true });
-  const checkout = await callOpen(context.client, context.project, "chat-1");
-  const firstWorktree = await callOpen(context.client, context.project, "chat-1", "worktree");
-  const secondWorktree = await callOpen(context.client, context.project, "chat-1", "worktree");
-  const checkoutAgain = await callOpen(context.client, context.project, "chat-1");
-
-  assert.notEqual(structuredContent(firstWorktree).workspaceId, structuredContent(secondWorktree).workspaceId);
-  assert.equal(structuredContent(checkoutAgain).workspaceId, structuredContent(checkout).workspaceId);
-  for (const result of [firstWorktree, secondWorktree]) {
-    const structured = structuredContent(result);
-    assert.equal(structured.mode, "worktree");
-    assert.ok(Array.isArray(structured.agentsFiles));
-    assert.ok(Array.isArray(structured.availableAgentsFiles));
-    assert.ok(Array.isArray(structured.skills));
-    assert.ok(Array.isArray(structured.agentProviders));
-    assert.ok(Array.isArray(structured.agents));
-    assert.ok(Array.isArray(structured.skillDiagnostics));
-    assert.match(responseText(result), /Opened isolated worktree workspace/);
-  }
-  assert.equal(structuredContent(checkoutAgain).agentsFiles, undefined);
-});
-
-test("checkout opened after a worktree receives its own complete context", async (t) => {
-  const context = await fixture(t, { git: true });
-  const worktree = await callOpen(context.client, context.project, "chat-1", "worktree");
-  const checkout = await callOpen(context.client, context.project, "chat-1");
-  const checkoutAgain = await callOpen(context.client, context.project, "chat-1");
-
-  assert.equal(structuredContent(worktree).mode, "worktree");
-  assert.ok(Array.isArray(structuredContent(worktree).agentsFiles));
-  assert.equal(structuredContent(checkout).mode, "checkout");
-  assert.ok(Array.isArray(structuredContent(checkout).agentsFiles));
-  assert.equal(structuredContent(checkoutAgain).workspaceId, structuredContent(checkout).workspaceId);
-  assert.equal(structuredContent(checkoutAgain).agentsFiles, undefined);
-});
-
-test("a host without conversation metadata receives normal explicit-workspace behavior", async (t) => {
-  const context = await fixture(t);
-  const first = await callOpen(context.client, context.project);
-  const second = await callOpen(context.client, context.project);
-
-  assert.notEqual(structuredContent(first).workspaceId, structuredContent(second).workspaceId);
-  assert.ok(Array.isArray(structuredContent(first).agentsFiles));
-  assert.ok(Array.isArray(structuredContent(second).agentsFiles));
-  assert.doesNotMatch(responseText(first), /conversation metadata/i);
-  assert.doesNotMatch(responseText(second), /conversation metadata/i);
-});
-
-test("checkout reuse and context suppression survive a registry restart", async (t) => {
+test("open_workspace scopes checkout reuse to OpenAI session metadata", async (t) => {
   const context = await fixture(t);
   const first = await callOpen(context.client, context.project, "chat-1");
-  const firstWorkspaceId = structuredContent(first).workspaceId;
+  const repeated = await callOpen(context.client, context.project, "chat-1");
+  const otherSession = await callOpen(context.client, context.project, "chat-2");
+  const unscoped = await callOpen(context.client, context.project);
 
-  await context.close();
-
-  const restoredStore = new SqliteWorkspaceStore(context.stateDir);
-  const restoredServer = createMcpServer(
-    context.config,
-    new WorkspaceRegistry(context.config, restoredStore),
-    createReviewCheckpointManager(),
-    new ProcessSessionManager(),
-    () => [],
-    [],
-  );
-  const [restoredClientTransport, restoredServerTransport] = InMemoryTransport.createLinkedPair();
-  const restoredClient = new Client({ name: "devspace-restored-test-client", version: "1.0.0" });
-  let restoredClosed = false;
-  const closeRestored = async () => {
-    if (restoredClosed) return;
-    restoredClosed = true;
-    await restoredClient.close();
-    await restoredServer.close();
-    restoredStore.close();
-  };
-  t.after(closeRestored);
-
-  try {
-    await Promise.all([
-      restoredClient.connect(restoredClientTransport),
-      restoredServer.connect(restoredServerTransport),
-    ]);
-
-    const restored = await callOpen(restoredClient, context.project, "chat-1");
-    assert.equal(structuredContent(restored).workspaceId, firstWorkspaceId);
-    assert.equal(structuredContent(restored).agentsFiles, undefined);
-  } finally {
-    await closeRestored();
-  }
+  assert.equal(structuredContent(repeated).workspaceId, structuredContent(first).workspaceId);
+  assert.equal(structuredContent(repeated).agentsFiles, undefined);
+  assert.notEqual(structuredContent(otherSession).workspaceId, structuredContent(first).workspaceId);
+  assert.notEqual(structuredContent(unscoped).workspaceId, structuredContent(first).workspaceId);
+  assert.ok(Array.isArray(structuredContent(otherSession).agentsFiles));
+  assert.ok(Array.isArray(structuredContent(unscoped).agentsFiles));
 });
 
 interface ServerFixture {
   client: Client;
   project: string;
-  config: ServerConfig;
-  stateDir: string;
-  close: () => Promise<void>;
 }
 
 async function fixture(
@@ -332,8 +302,8 @@ async function fixture(
     git?: boolean;
     localAgentProviders?: LocalAgentProviderAvailability[] | (() => LocalAgentProviderAvailability[]);
     subagents?: SubagentsConfig;
-    resumableBash?: boolean;
-    resumableBashYieldMs?: number;
+    toolMode?: ToolMode;
+    uiEnabled?: boolean;
   } = {},
 ): Promise<ServerFixture> {
   const root = await mkdtemp(join(tmpdir(), "devspace-server-test-"));
@@ -366,22 +336,20 @@ async function fixture(
   const initialProviderAvailability = typeof options.localAgentProviders === "function"
     ? options.localAgentProviders()
     : options.localAgentProviders ?? [];
-  const loadedConfig = loadConfig({
-    DEVSPACE_CONFIG_DIR: join(root, ".config"),
-    DEVSPACE_ALLOWED_ROOTS: root,
-    DEVSPACE_WORKTREE_ROOT: join(root, ".worktrees"),
-    DEVSPACE_AGENT_DIR: agentDir,
-    DEVSPACE_WIDGETS: "full",
-    DEVSPACE_TOOL_MODE: "full",
-    DEVSPACE_RESUMABLE_BASH: options.resumableBash ? "1" : "0",
-    DEVSPACE_RESUMABLE_BASH_YIELD_MS: String(options.resumableBashYieldMs ?? 10_000),
-    DEVSPACE_SUBAGENTS: options.localAgentProviders ? "1" : "0",
-    DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
-    PORT: "1",
-  });
+  const loadedConfig = loadConfig(writeTestDevspaceConfig(join(root, ".config"), {
+    server: { port: 1 },
+    workspaces: { allowedRoots: [root], worktreeRoot: join(root, ".worktrees") },
+    skills: { agentDir },
+    subagents: { enabled: options.localAgentProviders !== undefined, providers: [] },
+  }));
+  const modeConfig: ServerConfig = {
+    ...loadedConfig,
+    toolMode: options.toolMode ?? loadedConfig.toolMode,
+    uiEnabled: options.uiEnabled ?? loadedConfig.uiEnabled,
+  };
   const config: ServerConfig = options.localAgentProviders
     ? {
-        ...loadedConfig,
+        ...modeConfig,
         subagents: options.subagents ?? {
           enabled: true,
           providers: initialProviderAvailability.map((provider) => ({
@@ -390,7 +358,7 @@ async function fixture(
           })),
         },
       }
-    : loadedConfig;
+    : modeConfig;
   const resolveProviderAvailability: () => LocalAgentProviderAvailability[] =
     typeof options.localAgentProviders === "function"
       ? options.localAgentProviders
@@ -430,7 +398,7 @@ async function fixture(
     await rm(root, { recursive: true, force: true });
   });
 
-  return { client, project, config, stateDir, close };
+  return { client, project };
 }
 
 async function git(cwd: string, args: string[]): Promise<void> {
@@ -441,14 +409,10 @@ async function callOpen(
   client: Client,
   path: string,
   conversationScopeId?: string,
-  mode?: "checkout" | "worktree",
 ): Promise<Awaited<ReturnType<Client["callTool"]>>> {
   const params = {
     name: "open_workspace",
-    arguments: {
-      path,
-      ...(mode ? { mode } : {}),
-    },
+    arguments: { path },
     ...(conversationScopeId
       ? { _meta: { "openai/session": conversationScopeId } }
       : {}),
@@ -459,15 +423,6 @@ async function callOpen(
 function structuredContent(result: Awaited<ReturnType<Client["callTool"]>>): Record<string, unknown> {
   assert.ok(result.structuredContent);
   return result.structuredContent as Record<string, unknown>;
-}
-
-function responseText(result: Awaited<ReturnType<Client["callTool"]>>): string {
-  const content = (result as { content?: unknown }).content;
-  assert.ok(Array.isArray(content));
-  const first = content[0] as { type?: unknown; text?: unknown } | undefined;
-  assert.equal(first?.type, "text");
-  assert.equal(typeof first?.text, "string");
-  return first?.text as string;
 }
 
 function responseCard(result: Awaited<ReturnType<Client["callTool"]>>): Record<string, unknown> {

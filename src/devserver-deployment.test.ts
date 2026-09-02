@@ -23,11 +23,14 @@ const tmpStorage = await readFile(
 );
 
 const scriptsCopy = dockerfile.indexOf("COPY scripts ./scripts");
-const npmCi = dockerfile.indexOf("RUN npm ci");
+const pnpmInstall = dockerfile.indexOf("RUN pnpm install --frozen-lockfile");
 const vcsArgument = dockerfile.indexOf("ARG DEVSERVER_VCS_REF");
 const runtimeToolchain = dockerfile.indexOf("RUN apt-get update");
-assert.notEqual(scriptsCopy, -1, "Docker build must copy postinstall scripts before npm ci");
-assert.ok(scriptsCopy < npmCi, "Docker build must copy postinstall scripts before npm ci");
+assert.notEqual(scriptsCopy, -1, "Docker build must copy postinstall scripts before pnpm install");
+assert.ok(scriptsCopy < pnpmInstall, "Docker build must copy postinstall scripts before pnpm install");
+assert.match(dockerfile, /COPY package\.json pnpm-lock\.yaml pnpm-workspace\.yaml/);
+assert.match(dockerfile, /pnpm@11\.25\.0/);
+assert.doesNotMatch(dockerfile, /package-lock\.json|npm ci/);
 assert.ok(
   vcsArgument > runtimeToolchain,
   "Changing only the deployed revision must not invalidate the runtime toolchain layer",
@@ -44,6 +47,10 @@ assert.match(compose, /DEVSPACE_TOOL_MODE:\s*full/);
 assert.match(compose, /DEVSPACE_WIDGETS:\s*full/);
 assert.match(compose, /DEVSPACE_RESUMABLE_BASH:\s*"1"/);
 assert.match(compose, /DEVSPACE_RESUMABLE_BASH_YIELD_MS:\s*"5000"/);
+assert.match(compose, /DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_MS:\s*"300000"/);
+assert.match(compose, /DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_MS:\s*"30000"/);
+assert.match(compose, /DEVSPACE_MCP_SESSION_MAX_COUNT:\s*"128"/);
+assert.match(compose, /DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS:\s*"2"/);
 assert.match(compose, /mem_limit:\s*12g/);
 assert.match(compose, /memswap_limit:\s*16g/);
 assert.match(compose, /TMPDIR:\s*\/tmp/);
@@ -97,7 +104,8 @@ assert.match(codexConfig, /base_url = "https:\/\/api\.tokenlab\.cc\.cd"/);
 assert.match(codexConfig, /\[orchestrator\]/);
 assert.match(codexConfig, /default_subagent_model = "gpt-5\.6-luna"/);
 assert.match(codexConfig, /default_subagent_reasoning_effort = "max"/);
-assert.match(codexConfig, /max_concurrent_threads_per_session = 6/);
+assert.match(codexConfig, /DEVSERVER_CODEX_MAX_CONCURRENT_THREADS:-2/);
+assert.match(codexConfig, /max_concurrent_threads_per_session = %s/);
 assert.match(codexConfig, /hooks = true/);
 assert.match(codexConfig, /memories = true/);
 assert.match(codexConfig, /goals = true/);
@@ -107,6 +115,6 @@ assert.match(codexConfig, /trust_level = "trusted"/);
 assert.doesNotMatch(codexConfig, /use_legacy_landlock/);
 assert.doesNotMatch(codexConfig, /sk-[A-Za-z0-9_-]{8,}/);
 
-for (const tool of ["gh", "shellcheck", "tmux", "zsh", "rust-toolchain", "pnpm@10.23.0", "yarn@1.22.22"]) {
+for (const tool of ["gh", "shellcheck", "tmux", "zsh", "rust-toolchain", "pnpm@11.25.0", "yarn@1.22.22"]) {
   assert.match(dockerfile, new RegExp(tool), `DevServer image should include ${tool}`);
 }

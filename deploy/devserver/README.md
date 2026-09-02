@@ -18,7 +18,9 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 - Only `/home/ubuntu/work` is exposed as an allowed workspace root.
 - Subagent delegation is available only through DevSpace's configured Codex
   provider. The deployed config locks Codex to `gpt-5.6-luna` with `max`
-  reasoning and rejects model or effort overrides. Codex uses a setuid system
+  reasoning, rejects model or effort overrides, and admits at most two
+  concurrent turns in FIFO order. Codex's own thread scheduler is also capped
+  at two threads per session. Codex uses a setuid system
   `bubblewrap` binary for its nested Linux sandbox. Following OpenAI's container
   guidance, the DevServer service disables Docker's outer seccomp/AppArmor
   profiles and grants only the capabilities needed for nested sandbox setup.
@@ -29,7 +31,7 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
   initialize and configure its isolated loopback interface. The
   Docker socket is still not mounted.
 - The image includes Node 26.3.0/npm 11.16.0, Go 1.26.6, Rust/Cargo 1.94.1,
-  GitHub CLI 2.86.0, pnpm 10.23.0, yarn 1.22.22, Chromium with Noto CJK
+  GitHub CLI 2.86.0, pnpm 11.25.0, yarn 1.22.22, Chromium with Noto CJK
   fonts, zsh, tmux, shellcheck, GnuPG, PostgreSQL client headers, and Python
   build headers.
 - A persistent Python 3.12.11 environment is available at
@@ -53,6 +55,11 @@ The public connector URL is `https://devserver.ciward.dpdns.org/mcp`. A dedicate
 Cloudflare Tunnel connects directly to the `devserver` container on the private
 Compose network. Port `17676` is published only on server loopback for health and
 diagnostic probes.
+
+Abandoned MCP transports are retained for at most five minutes, checked every
+30 seconds, and capped at 128 sessions. This matches ChatGPT's short-lived MCP
+connection pattern and prevents transport state from accumulating for a full
+day.
 
 DevServer exposes the full DevSpace tool surface, including the legacy
 `write`/`edit`/`grep`/`glob`/`ls`/`bash` names expected by existing ChatGPT
@@ -105,11 +112,17 @@ The script requires exactly one matching active, unexpired key, writes only to
 the persistent DevServer home with mode `0600`, and never prints the key. Its
 portable Codex defaults mirror the Mac: `gpt-5.6-sol` with `xhigh` reasoning,
 a 1,000,000-token declared context window, a 900,000-token auto-compact limit,
-the same non-interactive execution policy, six concurrent agent threads, and a
+the same non-interactive execution policy, two concurrent agent threads by
+default, and a
 trusted workspace parent. Mac-only notification commands, plugin cache paths,
 and macOS project paths are intentionally omitted. DevSpace still passes its
 strict `gpt-5.6-luna` / `max` selection explicitly for every bounded subagent
 thread and turn.
+
+Set `DEVSERVER_CODEX_MAX_CONCURRENT_THREADS` when running the configuration
+script to choose a value from 1 to 32. DevSpace independently limits active
+subagent turns through `DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS`; DevServer uses
+2 so excess turns wait without starting another runtime or compiler workload.
 
 The current GitHub CLI login is persisted in
 `/home/ubuntu/.devserver/home/.config/gh/hosts.yml` with mode `0600`. GitHub

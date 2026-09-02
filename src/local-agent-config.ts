@@ -28,8 +28,9 @@ const providerSchema = z.object({
   }
 });
 
-const subagentsSchema = z.object({
+export const subagentsConfigSchema = z.object({
   enabled: z.boolean(),
+  maxConcurrentTurns: z.number().int().min(1).max(32).optional(),
   providers: z.array(providerSchema),
 }).strict().superRefine((value, context) => {
   const seen = new Set<LocalAgentProvider>();
@@ -45,9 +46,14 @@ const subagentsSchema = z.object({
   }
 });
 
+export const storedSubagentsConfigSchema = z.union([
+  z.boolean(),
+  subagentsConfigSchema,
+]);
+
 export type SubagentProviderConfig = z.infer<typeof providerSchema>;
-export type SubagentsConfig = z.infer<typeof subagentsSchema>;
-export type StoredSubagentsConfig = boolean | SubagentsConfig;
+export type SubagentsConfig = z.infer<typeof subagentsConfigSchema>;
+export type StoredSubagentsConfig = z.infer<typeof storedSubagentsConfigSchema>;
 
 export interface SubagentPolicyViolation {
   field: "model" | "effort";
@@ -59,23 +65,6 @@ export interface SubagentSelection {
   model?: string;
   effort?: string;
   policyViolation?: SubagentPolicyViolation;
-}
-
-export function resolveSubagentsConfig(
-  value: unknown,
-  env: NodeJS.ProcessEnv = process.env,
-): SubagentsConfig {
-  const stored = value === undefined
-    ? { enabled: false, providers: [] }
-    : typeof value === "boolean"
-      ? legacySubagentsConfig(value)
-      : subagentsSchema.parse(value);
-  return {
-    ...stored,
-    enabled: env.DEVSPACE_SUBAGENTS === undefined
-      ? stored.enabled
-      : parseBoolean(env.DEVSPACE_SUBAGENTS),
-  };
 }
 
 export function subagentProviderConfig(
@@ -129,17 +118,4 @@ export function resolveSubagentSelection(
     }
   }
   return { model, effort };
-}
-
-function legacySubagentsConfig(enabled: boolean): SubagentsConfig {
-  return {
-    enabled,
-    providers: enabled
-      ? LOCAL_AGENT_PROVIDERS.map((id) => ({ id, enabled: true }))
-      : [],
-  };
-}
-
-function parseBoolean(value: string): boolean {
-  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }

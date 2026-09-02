@@ -1,29 +1,28 @@
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
+import type { ToolMode } from "./config-schema.js";
 import { expandHomePath } from "./roots.js";
-import type { LoggingConfig, LogFormat, LogLevel } from "./logger.js";
+import type { LoggingConfig } from "./logger.js";
 import type { OAuthConfig } from "./oauth-provider.js";
 import { devspaceAgentsDir, devspaceSkillsDir, loadDevspaceFiles } from "./user-config.js";
-import { resolveSubagentsConfig, type SubagentsConfig } from "./local-agent-config.js";
+import type { SubagentsConfig } from "./local-agent-config.js";
 
-export type ToolMode = "minimal" | "full" | "codex";
-export type WidgetMode = "off" | "changes" | "full";
-const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
-const DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
-const DEFAULT_ARTIFACT_MAX_FILE_BYTES = 100 * 1024 * 1024;
-const DEFAULT_WORKTREE_MAX_COUNT = 10;
+export type { ToolMode } from "./config-schema.js";
 
 export interface ServerConfig {
+  configDir: string;
   host: string;
   port: number;
   oauth: OAuthConfig;
   allowedRoots: string[];
   allowedHosts: string[];
   publicBaseUrl: string;
+  mcpSessionIdleTimeoutMs: number;
+  mcpSessionCleanupIntervalMs: number;
+  mcpSessionMaxCount: number;
   toolMode: ToolMode;
   resumableBash: boolean;
   resumableBashYieldMs: number;
-  widgets: WidgetMode;
+  uiEnabled: boolean;
   stateDir: string;
   worktreeRoot: string;
   worktreeMaxCount: number;
@@ -35,206 +34,20 @@ export interface ServerConfig {
   devspaceSkillsDir: string;
   devspaceAgentsDir: string;
   subagents: SubagentsConfig;
+  subagentMaxConcurrentTurns: number;
   agentDir: string;
   logging: LoggingConfig;
 }
 
-function parsePort(value: string | number | undefined): number {
-  if (value === undefined || value === "") return 7676;
-
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid PORT: ${value}`);
-  }
-
-  return port;
-}
-
-function parseAllowedRoots(value: string | string[] | undefined): string[] {
-  if (Array.isArray(value)) {
-    const roots = value.map((entry) => entry.trim()).filter(Boolean);
-    return (roots.length > 0 ? roots : [process.cwd()]).map((root) => resolve(expandHomePath(root)));
-  }
-
-  const rawRoots =
-    value
-      ?.split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean) ?? [];
-
-  const roots = rawRoots.length > 0 ? rawRoots : [process.cwd()];
-  return roots.map((root) => resolve(expandHomePath(root)));
-}
-
-function parseAllowedHosts(value: string | string[] | undefined, derivedHosts: string[]): string[] {
-  if (Array.isArray(value)) {
-    return normalizeAllowedHosts(value, derivedHosts);
-  }
-
-  const rawHosts =
-    value
-      ?.split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean) ?? [];
-
-  return normalizeAllowedHosts(rawHosts, derivedHosts);
-}
-
-function normalizeAllowedHosts(rawHosts: string[], derivedHosts: string[]): string[] {
-  const hosts = rawHosts.length > 0 ? rawHosts : derivedHosts;
-  if (hosts.includes("*")) return ["*"];
-  return Array.from(new Set(hosts.map((host) => host.trim()).filter(Boolean)));
-}
-
-function parseBoolean(value: string | undefined): boolean {
-  return ["1", "true", "yes", "on"].includes(value?.toLowerCase() ?? "");
-}
-
-function parseToolMode(env: NodeJS.ProcessEnv): ToolMode {
-  const mode = env.DEVSPACE_TOOL_MODE;
-  if (mode === "minimal" || mode === "full" || mode === "codex") return mode;
-  if (mode) throw new Error(`Invalid DEVSPACE_TOOL_MODE: ${mode}`);
-
-  if (env.DEVSPACE_MINIMAL_TOOLS !== undefined) {
-    return parseBoolean(env.DEVSPACE_MINIMAL_TOOLS) ? "minimal" : "full";
-  }
-  return "minimal";
-}
-
-function parseLogLevel(value: string | undefined): LogLevel {
-  if (!value || value === "info") return "info";
-  if (["silent", "error", "warn", "debug"].includes(value)) return value as LogLevel;
-
-  throw new Error(`Invalid DEVSPACE_LOG_LEVEL: ${value}`);
-}
-
-function parseLogFormat(value: string | undefined): LogFormat {
-  if (!value || value === "json") return "json";
-  if (value === "pretty") return "pretty";
-
-  throw new Error(`Invalid DEVSPACE_LOG_FORMAT: ${value}`);
-}
-
-function parsePathList(value: string | undefined): string[] {
-  return (
-    value
-      ?.split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean) ?? []
-  );
-}
-
-function parseStringList(value: string | undefined, fallback: string[]): string[] {
-  const entries = value
-    ?.split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  return entries && entries.length > 0 ? entries : fallback;
-}
-
-function parsePositiveInteger(
-  value: string | undefined,
-  fallback: number,
-  name: string,
-  max = Number.MAX_SAFE_INTEGER,
-): number {
-  if (!value) return fallback;
-
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) {
-    throw new Error(`Invalid ${name}: ${value}`);
-  }
-
-  return parsed;
-}
-
-function parseNonNegativeInteger(
-  value: string | undefined,
-  fallback: number,
-  name: string,
-  max = Number.MAX_SAFE_INTEGER,
-): number {
-  if (value === undefined || value === "") return fallback;
-
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > max) {
-    throw new Error(`Invalid ${name}: ${value}`);
-  }
-
-  return parsed;
-}
-
-function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
-  return {
-    level: parseLogLevel(env.DEVSPACE_LOG_LEVEL),
-    format: parseLogFormat(env.DEVSPACE_LOG_FORMAT),
-    requests: env.DEVSPACE_LOG_REQUESTS === undefined ? true : parseBoolean(env.DEVSPACE_LOG_REQUESTS),
-    assets: parseBoolean(env.DEVSPACE_LOG_ASSETS),
-    toolCalls: env.DEVSPACE_LOG_TOOL_CALLS === undefined ? true : parseBoolean(env.DEVSPACE_LOG_TOOL_CALLS),
-    shellCommands: parseBoolean(env.DEVSPACE_LOG_SHELL_COMMANDS),
-    trustProxy: parseBoolean(env.DEVSPACE_TRUST_PROXY),
-  };
-}
-
-function parseWidgetMode(value: string | undefined): WidgetMode {
-  if (!value || value === "full") return "full";
-  if (value === "off" || value === "changes") return value;
-
-  throw new Error(`Invalid DEVSPACE_WIDGETS: ${value}`);
-}
-
-function parseRequiredSecret(value: string | undefined, name: string): string {
-  const secret = value?.trim();
-  if (!secret) {
-    throw new Error(`${name} is required for DevSpace OAuth. Run: devspace init`);
-  }
-  if (secret.length < 16) {
-    throw new Error(`${name} must be at least 16 characters long.`);
-  }
-  return secret;
-}
-
-function parseOAuthConfig(env: NodeJS.ProcessEnv, ownerToken: string | undefined): OAuthConfig {
-  return {
-    ownerToken: parseRequiredSecret(env.DEVSPACE_OAUTH_OWNER_TOKEN ?? ownerToken, "DEVSPACE_OAUTH_OWNER_TOKEN"),
-    accessTokenTtlSeconds: parsePositiveInteger(
-      env.DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS,
-      DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS,
-      "DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS",
-    ),
-    refreshTokenTtlSeconds: parsePositiveInteger(
-      env.DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS,
-      DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS,
-      "DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS",
-    ),
-    scopes: parseStringList(env.DEVSPACE_OAUTH_SCOPES, ["devspace"]),
-    allowedRedirectHosts: parseStringList(env.DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS, [
-      "chatgpt.com",
-      "localhost",
-      "127.0.0.1",
-    ]),
-  };
-}
-
-function defaultStateDir(): string {
-  return join(homedir(), ".local", "share", "devspace");
-}
-
-function defaultWorktreeRoot(): string {
-  return join(homedir(), ".devspace", "worktrees");
-}
-
-function defaultAgentDir(): string {
-  return join(homedir(), ".codex");
-}
-
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const files = loadDevspaceFiles(env);
-  const host = env.HOST ?? files.config.host ?? "127.0.0.1";
-  const port = parsePort(env.PORT ?? files.config.port);
+  const stored = files.config;
+  const host = env.HOST?.trim() || stored.server.host;
+  const port = parseBoundedInteger(env.PORT, stored.server.port, "PORT", 1, 65_535);
   const publicBaseUrl = parsePublicBaseUrl(
-    env.DEVSPACE_PUBLIC_BASE_URL ?? files.config.publicBaseUrl ?? localPublicBaseUrl(host, port),
+    env.DEVSPACE_PUBLIC_BASE_URL?.trim()
+      || stored.server.publicBaseUrl
+      || localPublicBaseUrl(host, port),
   );
   const derivedAllowedHosts = [
     "localhost",
@@ -242,58 +55,214 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     "::1",
     host,
     new URL(publicBaseUrl).hostname,
-    ...(files.config.allowedHosts ?? []),
+    ...stored.server.allowedHosts,
   ];
+  const configuredAllowedHosts = parseStringList(env.DEVSPACE_ALLOWED_HOSTS);
+  const configuredAllowedRoots = parseStringList(env.DEVSPACE_ALLOWED_ROOTS);
+  const subagentMaxConcurrentTurns = parseBoundedInteger(
+    env.DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS,
+    stored.subagents.maxConcurrentTurns ?? 4,
+    "DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS",
+    1,
+    32,
+  );
 
   return {
+    configDir: files.dir,
     host,
     port,
-    oauth: parseOAuthConfig(env, files.auth.ownerToken),
-    allowedRoots: parseAllowedRoots(env.DEVSPACE_ALLOWED_ROOTS ?? files.config.allowedRoots),
-    allowedHosts: parseAllowedHosts(env.DEVSPACE_ALLOWED_HOSTS, derivedAllowedHosts),
+    oauth: {
+      ownerToken: parseRequiredSecret(
+        env.DEVSPACE_OAUTH_OWNER_TOKEN ?? files.auth.ownerToken,
+      ),
+      accessTokenTtlSeconds: parseBoundedInteger(
+        env.DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS,
+        stored.oauth.accessTokenTtlSeconds,
+        "DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS",
+        1,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      refreshTokenTtlSeconds: parseBoundedInteger(
+        env.DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS,
+        stored.oauth.refreshTokenTtlSeconds,
+        "DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS",
+        1,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      scopes: parseStringList(env.DEVSPACE_OAUTH_SCOPES) ?? stored.oauth.scopes,
+      allowedRedirectHosts: parseStringList(env.DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS)
+        ?? stored.oauth.allowedRedirectHosts,
+    },
+    allowedRoots: normalizePaths(
+      configuredAllowedRoots ?? stored.workspaces.allowedRoots,
+      [process.cwd()],
+    ),
+    allowedHosts: normalizeAllowedHosts(configuredAllowedHosts ?? derivedAllowedHosts),
     publicBaseUrl,
-    toolMode: parseToolMode(env),
-    resumableBash: parseBoolean(env.DEVSPACE_RESUMABLE_BASH),
-    resumableBashYieldMs: parsePositiveInteger(
-      env.DEVSPACE_RESUMABLE_BASH_YIELD_MS,
+    mcpSessionIdleTimeoutMs: parseBoundedInteger(
+      env.DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_MS,
+      stored.server.mcpSessionIdleTimeoutMs,
+      "DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_MS",
+      30_000,
+      24 * 60 * 60 * 1_000,
+    ),
+    mcpSessionCleanupIntervalMs: parseBoundedInteger(
+      env.DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_MS,
+      stored.server.mcpSessionCleanupIntervalMs,
+      "DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_MS",
+      1_000,
+      60 * 60 * 1_000,
+    ),
+    mcpSessionMaxCount: parseBoundedInteger(
+      env.DEVSPACE_MCP_SESSION_MAX_COUNT,
+      stored.server.mcpSessionMaxCount,
+      "DEVSPACE_MCP_SESSION_MAX_COUNT",
+      1,
       10_000,
+    ),
+    toolMode: parseToolMode(env.DEVSPACE_TOOL_MODE, stored.tools.mode),
+    resumableBash: env.DEVSPACE_RESUMABLE_BASH === undefined
+      ? stored.tools.resumableBash
+      : parseBoolean(env.DEVSPACE_RESUMABLE_BASH),
+    resumableBashYieldMs: parseBoundedInteger(
+      env.DEVSPACE_RESUMABLE_BASH_YIELD_MS,
+      stored.tools.resumableBashYieldMs,
       "DEVSPACE_RESUMABLE_BASH_YIELD_MS",
+      0,
       30_000,
     ),
-    widgets: parseWidgetMode(env.DEVSPACE_WIDGETS),
-    stateDir: resolve(expandHomePath(env.DEVSPACE_STATE_DIR ?? files.config.stateDir ?? defaultStateDir())),
-    worktreeRoot: resolve(expandHomePath(env.DEVSPACE_WORKTREE_ROOT ?? files.config.worktreeRoot ?? defaultWorktreeRoot())),
-    worktreeMaxCount: parseNonNegativeInteger(
-      env.DEVSPACE_WORKTREE_MAX_COUNT ?? numberConfigValue(files.config.worktreeMaxCount),
-      DEFAULT_WORKTREE_MAX_COUNT,
+    uiEnabled: parseWidgetEnabled(env.DEVSPACE_WIDGETS, stored.ui.enabled),
+    stateDir: normalizePath(env.DEVSPACE_STATE_DIR?.trim() || stored.storage.stateDir),
+    worktreeRoot: normalizePath(
+      env.DEVSPACE_WORKTREE_ROOT?.trim() || stored.workspaces.worktreeRoot,
+    ),
+    worktreeMaxCount: parseBoundedInteger(
+      env.DEVSPACE_WORKTREE_MAX_COUNT,
+      stored.workspaces.worktreeMaxCount,
       "DEVSPACE_WORKTREE_MAX_COUNT",
+      0,
       10_000,
     ),
-    worktreeArchiveRemote:
-      env.DEVSPACE_WORKTREE_ARCHIVE_REMOTE?.trim()
-      || files.config.worktreeArchiveRemote?.trim()
-      || "origin",
-    artifactsEnabled:
-      env.DEVSPACE_ARTIFACTS === undefined
-        ? files.config.artifactsEnabled === true
-        : parseBoolean(env.DEVSPACE_ARTIFACTS),
-    artifactMaxFileBytes: parsePositiveInteger(
-      env.DEVSPACE_ARTIFACT_MAX_FILE_BYTES ?? numberConfigValue(files.config.artifactMaxFileBytes),
-      DEFAULT_ARTIFACT_MAX_FILE_BYTES,
+    worktreeArchiveRemote: env.DEVSPACE_WORKTREE_ARCHIVE_REMOTE?.trim()
+      || stored.workspaces.worktreeArchiveRemote,
+    artifactsEnabled: env.DEVSPACE_ARTIFACTS === undefined
+      ? stored.artifacts.enabled
+      : parseBoolean(env.DEVSPACE_ARTIFACTS),
+    artifactMaxFileBytes: parseBoundedInteger(
+      env.DEVSPACE_ARTIFACT_MAX_FILE_BYTES,
+      stored.artifacts.maxFileBytes,
       "DEVSPACE_ARTIFACT_MAX_FILE_BYTES",
+      1,
+      Number.MAX_SAFE_INTEGER,
     ),
-    skillsEnabled: env.DEVSPACE_SKILLS === undefined ? true : parseBoolean(env.DEVSPACE_SKILLS),
-    skillPaths: parsePathList(env.DEVSPACE_SKILL_PATHS),
+    skillsEnabled: env.DEVSPACE_SKILLS === undefined
+      ? stored.skills.enabled
+      : parseBoolean(env.DEVSPACE_SKILLS),
+    skillPaths: parseStringList(env.DEVSPACE_SKILL_PATHS) ?? stored.skills.paths,
     devspaceSkillsDir: devspaceSkillsDir(env),
     devspaceAgentsDir: devspaceAgentsDir(env),
-    subagents: resolveSubagentsConfig(files.config.subagents, env),
-    agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
-    logging: parseLoggingConfig(env),
+    subagents: {
+      ...stored.subagents,
+      enabled: env.DEVSPACE_SUBAGENTS === undefined
+        ? stored.subagents.enabled
+        : parseBoolean(env.DEVSPACE_SUBAGENTS),
+      maxConcurrentTurns: subagentMaxConcurrentTurns,
+    },
+    subagentMaxConcurrentTurns,
+    agentDir: normalizePath(env.DEVSPACE_AGENT_DIR?.trim() || stored.skills.agentDir),
+    logging: {
+      level: parseLogLevel(env.DEVSPACE_LOG_LEVEL, stored.logging.level),
+      format: parseLogFormat(env.DEVSPACE_LOG_FORMAT, stored.logging.format),
+      requests: parseOptionalBoolean(env.DEVSPACE_LOG_REQUESTS, stored.logging.requests),
+      assets: parseOptionalBoolean(env.DEVSPACE_LOG_ASSETS, stored.logging.assets),
+      toolCalls: parseOptionalBoolean(env.DEVSPACE_LOG_TOOL_CALLS, stored.logging.toolCalls),
+      shellCommands: parseOptionalBoolean(
+        env.DEVSPACE_LOG_SHELL_COMMANDS,
+        stored.logging.shellCommands,
+      ),
+      trustProxy: parseOptionalBoolean(env.DEVSPACE_TRUST_PROXY, stored.server.trustProxy),
+    },
   };
 }
 
-function numberConfigValue(value: number | undefined): string | undefined {
-  return value === undefined ? undefined : String(value);
+function parseToolMode(value: string | undefined, fallback: ToolMode): ToolMode {
+  if (value === undefined || value === "") return fallback;
+  if (value === "claude" || value === "codex" || value === "full") return value;
+  throw new Error(`Invalid DEVSPACE_TOOL_MODE: ${value}`);
+}
+
+function parseBoolean(value: string): boolean {
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
+function parseOptionalBoolean(value: string | undefined, fallback: boolean): boolean {
+  return value === undefined ? fallback : parseBoolean(value);
+}
+
+function parseWidgetEnabled(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value === "") return fallback;
+  if (value === "off") return false;
+  if (value === "changes" || value === "full") return true;
+  throw new Error(`Invalid DEVSPACE_WIDGETS: ${value}`);
+}
+
+function parseLogLevel(value: string | undefined, fallback: LoggingConfig["level"]): LoggingConfig["level"] {
+  if (value === undefined || value === "") return fallback;
+  if (["silent", "error", "warn", "info", "debug"].includes(value)) {
+    return value as LoggingConfig["level"];
+  }
+  throw new Error(`Invalid DEVSPACE_LOG_LEVEL: ${value}`);
+}
+
+function parseLogFormat(value: string | undefined, fallback: LoggingConfig["format"]): LoggingConfig["format"] {
+  if (value === undefined || value === "") return fallback;
+  if (value === "json" || value === "pretty") return value;
+  throw new Error(`Invalid DEVSPACE_LOG_FORMAT: ${value}`);
+}
+
+function parseStringList(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  const entries = value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  return entries.length > 0 ? entries : undefined;
+}
+
+function parseBoundedInteger(
+  value: string | undefined,
+  fallback: number,
+  name: string,
+  minimum: number,
+  maximum: number,
+): number {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`Invalid ${name}: ${value}`);
+  }
+  return parsed;
+}
+
+function normalizePaths(paths: string[], fallback: string[] = []): string[] {
+  return (paths.length > 0 ? paths : fallback).map(normalizePath);
+}
+
+function normalizePath(path: string): string {
+  return resolve(expandHomePath(path));
+}
+
+function normalizeAllowedHosts(hosts: string[]): string[] {
+  if (hosts.includes("*")) return ["*"];
+  return Array.from(new Set(hosts.map((host) => host.trim()).filter(Boolean)));
+}
+
+function parseRequiredSecret(value: string | undefined): string {
+  const secret = value?.trim();
+  if (!secret) {
+    throw new Error("OAuth owner token is required. Run: devspace init");
+  }
+  if (secret.length < 16) {
+    throw new Error("OAuth owner token must be at least 16 characters long.");
+  }
+  return secret;
 }
 
 function parsePublicBaseUrl(value: string): string {

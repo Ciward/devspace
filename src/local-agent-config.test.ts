@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import {
   isSubagentProviderEnabled,
-  resolveSubagentsConfig,
   subagentProviderConfig,
+  subagentsConfigSchema,
 } from "./local-agent-config.js";
 
-const config = resolveSubagentsConfig({
+const config = subagentsConfigSchema.parse({
   enabled: true,
   providers: [
     { id: "codex", enabled: true, model: " gpt-5.4 ", effort: " high " },
     { id: "claude", enabled: false, model: "sonnet" },
   ],
-}, {});
+});
 assert.deepEqual(config, {
   enabled: true,
   providers: [
@@ -24,36 +24,29 @@ assert.equal(isSubagentProviderEnabled(config, "claude"), false);
 assert.equal(isSubagentProviderEnabled(config, "pi"), false);
 assert.equal(subagentProviderConfig(config, "codex")?.model, "gpt-5.4");
 
-assert.equal(resolveSubagentsConfig(config, { DEVSPACE_SUBAGENTS: "0" }).enabled, false);
-assert.equal(resolveSubagentsConfig({ ...config, enabled: false }, {
-  DEVSPACE_SUBAGENTS: "1",
-}).enabled, true);
-assert.equal(resolveSubagentsConfig(undefined, {}).providers.length, 0);
-assert.equal(resolveSubagentsConfig(true, {}).providers.length, 7);
-
 assert.throws(
-  () => resolveSubagentsConfig({
+  () => subagentsConfigSchema.parse({
     enabled: true,
     providers: [{ id: "codex", enabled: true }, { id: "codex", enabled: false }],
-  }, {}),
+  }),
   /Duplicate subagent provider: codex/,
 );
 assert.throws(
-  () => resolveSubagentsConfig({
+  () => subagentsConfigSchema.parse({
     enabled: true,
     providers: [{ id: "unknown", enabled: true }],
-  }, {}),
+  }),
   /Invalid option/,
 );
 assert.throws(
-  () => resolveSubagentsConfig({
+  () => subagentsConfigSchema.parse({
     enabled: true,
     providers: [{ id: "codex", enabled: true, effort: "  " }],
-  }, {}),
+  }),
   /Too small/,
 );
 
-const strict = resolveSubagentsConfig({
+const strict = subagentsConfigSchema.parse({
   enabled: true,
   providers: [{
     id: "codex",
@@ -62,7 +55,7 @@ const strict = resolveSubagentsConfig({
     effort: "max",
     allowOverrides: false,
   }],
-}, {});
+});
 assert.deepEqual(strict.providers[0], {
   id: "codex",
   enabled: true,
@@ -71,16 +64,16 @@ assert.deepEqual(strict.providers[0], {
   allowOverrides: false,
 });
 assert.throws(
-  () => resolveSubagentsConfig({
+  () => subagentsConfigSchema.parse({
     enabled: true,
     providers: [{ id: "codex", enabled: true, effort: "max", allowOverrides: false }],
-  }, {}),
+  }),
   /model.*required/i,
 );
 assert.throws(
-  () => resolveSubagentsConfig({
+  () => subagentsConfigSchema.parse({
     enabled: true,
     providers: [{ id: "codex", enabled: true, model: "gpt-5.6-luna", allowOverrides: false }],
-  }, {}),
+  }),
   /effort.*required/i,
 );

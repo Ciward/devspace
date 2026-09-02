@@ -48,6 +48,23 @@ assert.equal(failingResults.find((result) => result.sessionId === "failing")?.er
 assert.equal(failingTransport.closeCalls, 1);
 assert.equal(registry.size, 0);
 
+const capacityRegistry = new McpSessionRegistry<FakeTransport>({ now: () => now });
+const capacityTransports = [createTransport(), createTransport(), createTransport()];
+now = 20_000;
+capacityRegistry.register("oldest", capacityTransports[0]!);
+now = 21_000;
+capacityRegistry.register("middle", capacityTransports[1]!);
+now = 22_000;
+capacityRegistry.register("newest", capacityTransports[2]!);
+const closeOverflow = (capacityRegistry as unknown as {
+  closeOverflow?: (maximum: number) => Promise<Array<{ sessionId: string }>>;
+}).closeOverflow;
+assert.equal(typeof closeOverflow, "function", "registry should expose capacity eviction");
+const capacityResults = await closeOverflow!.call(capacityRegistry, 2);
+assert.deepEqual(capacityResults, [{ sessionId: "oldest" }]);
+assert.equal(capacityTransports[0]!.closeCalls, 1);
+assert.equal(capacityRegistry.size, 2);
+
 const first = createTransport();
 const second = createTransport();
 registry.register("first", first);

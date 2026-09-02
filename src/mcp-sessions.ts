@@ -61,6 +61,24 @@ export class McpSessionRegistry<TTransport extends ClosableMcpTransport> {
     return closeSessions(idleSessions);
   }
 
+  async closeOverflow(maximum: number): Promise<McpSessionCloseResult[]> {
+    if (!Number.isInteger(maximum) || maximum < 1) {
+      throw new Error("MCP session capacity must be a positive integer.");
+    }
+    if (this.sessions.size <= maximum) return [];
+
+    const overflow = Array.from(this.sessions, ([sessionId, entry]) => ({
+      sessionId,
+      transport: entry.transport,
+      lastActivityAt: entry.lastActivityAt,
+    }))
+      .sort((left, right) => left.lastActivityAt - right.lastActivityAt)
+      .slice(0, this.sessions.size - maximum);
+
+    for (const entry of overflow) this.sessions.delete(entry.sessionId);
+    return closeSessions(overflow);
+  }
+
   async closeAll(): Promise<McpSessionCloseResult[]> {
     const sessions = Array.from(this.sessions, ([sessionId, entry]) => ({
       sessionId,
