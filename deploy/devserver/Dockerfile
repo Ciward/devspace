@@ -96,9 +96,10 @@ COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/pnpm-lock.yaml /opt/devspa
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/pnpm-workspace.yaml /opt/devspace/pnpm-workspace.yaml
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/node_modules /opt/devspace/node_modules
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/dist /opt/devspace/dist
+COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/bin /opt/devspace/bin
 COPY --from=build --chown=ubuntu:ubuntu /opt/devspace/skills /opt/devspace/skills
 COPY --chmod=0755 deploy/devserver/codex-bootstrap.sh /opt/devspace/bin/codex-bootstrap.sh
-RUN ln -s /opt/devspace/dist/cli.js /usr/local/bin/devspace
+RUN ln -s /opt/devspace/bin/devspace.js /usr/local/bin/devspace
 
 ARG DEVSERVER_VCS_REF=unknown
 
