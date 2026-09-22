@@ -65,6 +65,30 @@ assert.deepEqual(capacityResults, [{ sessionId: "oldest" }]);
 assert.equal(capacityTransports[0]!.closeCalls, 1);
 assert.equal(capacityRegistry.size, 2);
 
+const releaseCapacityRequest = capacityRegistry.beginRequest("newest");
+const preservedCapacityResults = await closeOverflow!.call(capacityRegistry, 1);
+assert.deepEqual(preservedCapacityResults, [{ sessionId: "middle" }]);
+assert.equal(capacityTransports[2]!.closeCalls, 0);
+assert.equal(capacityRegistry.size, 1);
+releaseCapacityRequest?.();
+
+const inFlightRegistry = new McpSessionRegistry<FakeTransport>({ now: () => now });
+const inFlightTransport = createTransport();
+inFlightRegistry.register("in-flight", inFlightTransport);
+now = 30_000;
+const releaseInFlight = inFlightRegistry.beginRequest("in-flight");
+assert.equal(typeof releaseInFlight, "function");
+const skippedIdle = await inFlightRegistry.closeIdle(1);
+assert.deepEqual(skippedIdle, []);
+assert.equal(inFlightTransport.closeCalls, 0);
+const skippedCapacity = await inFlightRegistry.closeOverflow(0 as never).catch((error: unknown) => error);
+assert.match(String(skippedCapacity), /positive integer/);
+releaseInFlight?.();
+now = 30_002;
+const closedAfterRelease = await inFlightRegistry.closeIdle(1);
+assert.deepEqual(closedAfterRelease, [{ sessionId: "in-flight" }]);
+assert.equal(inFlightTransport.closeCalls, 1);
+
 const first = createTransport();
 const second = createTransport();
 registry.register("first", first);

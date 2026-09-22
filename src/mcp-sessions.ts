@@ -10,6 +10,7 @@ export interface McpSessionCloseResult {
 interface McpSessionEntry<TTransport> {
   transport: TTransport;
   lastActivityAt: number;
+  activeRequests: number;
 }
 
 export interface McpSessionRegistryOptions {
@@ -32,6 +33,7 @@ export class McpSessionRegistry<TTransport extends ClosableMcpTransport> {
     this.sessions.set(sessionId, {
       transport,
       lastActivityAt: this.now(),
+      activeRequests: 0,
     });
   }
 
@@ -43,6 +45,22 @@ export class McpSessionRegistry<TTransport extends ClosableMcpTransport> {
     return entry.transport;
   }
 
+  /** Keep long-running MCP requests alive while the handler is still executing. */
+  beginRequest(sessionId: string): (() => void) | undefined {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return undefined;
+
+    entry.lastActivityAt = this.now();
+    entry.activeRequests += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      entry.activeRequests = Math.max(0, entry.activeRequests - 1);
+      entry.lastActivityAt = this.now();
+    };
+  }
+
   remove(sessionId: string): boolean {
     return this.sessions.delete(sessionId);
   }
@@ -52,6 +70,7 @@ export class McpSessionRegistry<TTransport extends ClosableMcpTransport> {
     const idleSessions: Array<{ sessionId: string; transport: TTransport }> = [];
 
     for (const [sessionId, entry] of this.sessions) {
+      if (entry.activeRequests > 0) continue;
       if (entry.lastActivityAt > cutoff) continue;
 
       this.sessions.delete(sessionId);
@@ -67,13 +86,16 @@ export class McpSessionRegistry<TTransport extends ClosableMcpTransport> {
     }
     if (this.sessions.size <= maximum) return [];
 
+    const overflowCount = this.sessions.size - maximum;
     const overflow = Array.from(this.sessions, ([sessionId, entry]) => ({
       sessionId,
       transport: entry.transport,
       lastActivityAt: entry.lastActivityAt,
+      activeRequests: entry.activeRequests,
     }))
+      .filter((entry) => entry.activeRequests === 0)
       .sort((left, right) => left.lastActivityAt - right.lastActivityAt)
-      .slice(0, this.sessions.size - maximum);
+      .slice(0, overflowCount);
 
     for (const entry of overflow) this.sessions.delete(entry.sessionId);
     return closeSessions(overflow);

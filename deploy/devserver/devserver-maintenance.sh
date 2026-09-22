@@ -135,13 +135,13 @@ cleanup_stale_scratch() {
 routine_docker_cleanup() {
   docker_devserver container prune --force --filter until=24h >/dev/null
   docker_devserver image prune --force --filter until=168h >/dev/null
-  run_builder_prune --force --filter until=24h --keep-storage 8GB
+  run_builder_prune --force --filter until=24h --reserved-space 8GB
 }
 
 soft_pressure_cleanup() {
   log "soft disk-pressure cleanup"
   docker_devserver image prune --all --force --filter until=168h >/dev/null
-  run_builder_prune --all --force --filter until=24h --keep-storage 4GB
+  run_builder_prune --all --force --filter until=24h --reserved-space 4GB
 }
 
 active_build_processes() {
@@ -153,7 +153,7 @@ active_build_processes() {
 hard_pressure_cleanup() {
   log "hard disk-pressure cleanup"
   docker_devserver image prune --all --force >/dev/null
-  run_builder_prune --all --force --keep-storage 1GB
+  run_builder_prune --all --force --reserved-space 1GB
 
   if active_build_processes; then
     log "skipping package-cache cleanup while a build process is active"
@@ -294,6 +294,8 @@ main() {
   (( DISK_HARD_PERCENT < DISK_CRITICAL_PERCENT )) || die "hard threshold must be below critical threshold"
 
   install -d -m 0755 "$STATE_ROOT"
+  export DOCKER_CONFIG="${DEVSERVER_DOCKER_CONFIG:-$STATE_ROOT/docker}"
+  install -d -m 0700 "$DOCKER_CONFIG"
   exec 9>"$LOCK_FILE"
   if ! flock -n 9; then
     log "another maintenance run is active"

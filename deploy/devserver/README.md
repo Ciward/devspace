@@ -125,7 +125,10 @@ downtime. Every run first verifies `/dev/sdb1`, `/srv/devserver`, the dedicated
 Docker socket and Docker root. It will not fall back to the system disk or the
 TokenLab Docker daemon.
 
-The maintenance job performs these bounded actions:
+The maintenance job performs these bounded actions. MCP sessions with an active
+request are never evicted by idle or capacity cleanup; the DevServer image also
+disables Node's default five-minute HTTP request timeout so long-running tool
+calls are not cut off by the origin process.
 
 - Starts either dedicated container if it is stopped and restarts DevServer only
   after Docker's healthcheck has declared it `unhealthy`.

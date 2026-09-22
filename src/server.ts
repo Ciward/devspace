@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Server as HttpServer } from "node:http";
 import { readFileSync, type Dirent } from "node:fs";
 import { access, readdir, realpath, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -907,6 +908,16 @@ export interface CreateServerOptions {
   incomingArtifactAdapters?: readonly IncomingArtifactAdapter[];
 }
 
+export function configureHttpServer(httpServer: HttpServer): HttpServer {
+  // MCP calls may legitimately remain open while a command or provider turn runs.
+  // Node's default 300s request timeout otherwise looks like a random transport drop.
+  httpServer.requestTimeout = 0;
+  httpServer.setTimeout(0);
+  httpServer.headersTimeout = 0;
+  httpServer.keepAliveTimeout = 65_000;
+  return httpServer;
+}
+
 export function createServer(
   config = loadConfig(),
   options: CreateServerOptions = {},
@@ -1084,12 +1095,14 @@ export function createServer(
     try {
       let transport: Transport | undefined;
 
+      let releaseSessionRequest: (() => void) | undefined;
       if (sessionId) {
         transport = transports.get(sessionId);
         if (!transport) {
           sendJsonRpcError(res, 404, -32000, "Unknown MCP session");
           return;
         }
+        releaseSessionRequest = transports.beginRequest(sessionId);
       } else if (initializeRequest) {
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
@@ -1132,7 +1145,11 @@ export function createServer(
         return;
       }
 
-      await transport.handleRequest(req, res, req.body);
+      try {
+        await transport.handleRequest(req, res, req.body);
+      } finally {
+        releaseSessionRequest?.();
+      }
     } catch (error) {
       logEvent(config.logging, "error", "mcp_request_error", {
         requestId,
@@ -1173,7 +1190,7 @@ async function isMainModule(): Promise<boolean> {
 
 if (await isMainModule()) {
   const { app, config, close, localAgentProviders } = createServer();
-  const httpServer = app.listen(config.port, config.host, () => {
+  const httpServer = configureHttpServer(app.listen(config.port, config.host, () => {
     console.log(
       `devspace listening on http://${config.host}:${config.port}/mcp`,
     );
@@ -1190,7 +1207,7 @@ if (await isMainModule()) {
         : `unsupported on ${process.platform}`;
     console.log(`native artifact download: ${artifactDownloadStatus}`);
     console.log(`subagent providers: ${formatLocalAgentProviderStatusSummary(localAgentProviders)}`);
-  });
+  }));
 
   let shuttingDown = false;
   const shutdown = async () => {
