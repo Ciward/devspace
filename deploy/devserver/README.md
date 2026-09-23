@@ -128,7 +128,10 @@ TokenLab Docker daemon.
 The maintenance job performs these bounded actions. MCP sessions with an active
 request are never evicted by idle or capacity cleanup; the DevServer image also
 disables Node's default five-minute HTTP request timeout so long-running tool
-calls are not cut off by the origin process.
+calls are not cut off by the origin process. The container is configured with
+16 GiB RAM plus 6 GiB swap allowance, 6 CPUs, and 8192 PIDs; these limits leave
+headroom for browser and compiler workloads while retaining the host-level
+DevServer priority and cleanup boundaries.
 
 - Starts either dedicated container if it is stopped and restarts DevServer only
   after Docker's healthcheck has declared it `unhealthy`.

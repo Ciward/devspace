@@ -92,7 +92,7 @@ assert.ok(
   "Changing only the deployed revision must not invalidate the runtime toolchain layer",
 );
 
-assert.match(compose, /pids_limit:\s*4096/);
+assert.match(compose, /pids_limit:\s*8192/);
 assert.match(compose, /cloudflare\/cloudflared:2026\.8\.2@sha256:/);
 assert.ok(
   compose.includes("/srv/devserver/runtime/work:/home/ubuntu/work"),
@@ -105,10 +105,12 @@ assert.match(compose, /DEVSPACE_RESUMABLE_BASH:\s*"1"/);
 assert.match(compose, /DEVSPACE_RESUMABLE_BASH_YIELD_MS:\s*"5000"/);
 assert.match(compose, /DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_MS:\s*"1800000"/);
 assert.match(compose, /DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_MS:\s*"30000"/);
-assert.match(compose, /DEVSPACE_MCP_SESSION_MAX_COUNT:\s*"256"/);
+assert.match(compose, /DEVSPACE_MCP_SESSION_MAX_COUNT:\s*"1024"/);
 assert.match(compose, /DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS:\s*"2"/);
-assert.match(compose, /mem_limit:\s*12g/);
-assert.match(compose, /memswap_limit:\s*16g/);
+assert.match(compose, /cpus:\s*6\.0/);
+assert.match(compose, /mem_limit:\s*16g/);
+assert.match(compose, /memswap_limit:\s*22g/);
+assert.match(compose, /pids_limit:\s*8192/);
 assert.match(compose, /TMPDIR:\s*\/tmp/);
 assert.match(compose, /GOTMPDIR:\s*\/tmp/);
 assert.doesNotMatch(compose, /DEVSERVER_HOME|DEVSERVER_WORK_ROOT|DEVSERVER_TMP_ROOT/);

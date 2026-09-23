@@ -34,7 +34,7 @@ services:
       DEVSPACE_RESUMABLE_BASH_YIELD_MS: "5000"
       DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_MS: "1800000"
       DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_MS: "30000"
-      DEVSPACE_MCP_SESSION_MAX_COUNT: "256"
+      DEVSPACE_MCP_SESSION_MAX_COUNT: "1024"
       DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS: "2"
       DEVSPACE_WIDGETS: full
       DEVSPACE_SKILLS: "1"
@@ -72,11 +72,11 @@ services:
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
-    cpus: 4.0
-    mem_limit: 12g
-    memswap_limit: 16g
+    cpus: 6.0
+    mem_limit: 16g
+    memswap_limit: 22g
     oom_score_adj: 500
-    pids_limit: 4096
+    pids_limit: 8192
     ulimits:
       nofile:
         soft: 65536
