@@ -73,8 +73,8 @@ services:
       - seccomp=unconfined
       - apparmor=unconfined
     cpus: 6.0
-    mem_limit: 16g
-    memswap_limit: 22g
+    mem_limit: 18g
+    memswap_limit: 24g
     oom_score_adj: 500
     pids_limit: 8192
     ulimits:
