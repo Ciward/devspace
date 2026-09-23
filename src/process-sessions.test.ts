@@ -119,6 +119,24 @@ assert.equal(completed.running, false);
 assert.equal(completed.exitCode, 0);
 assert.match(completed.output, /finished/);
 
+const retriedCompleted = await manager.write({
+  workspaceId: "workspace-a",
+  sessionId: background.sessionId,
+  yieldTimeMs: 1,
+});
+assert.equal(retriedCompleted.running, false);
+assert.equal(retriedCompleted.exitCode, 0);
+
+await new Promise((resolve) => setTimeout(resolve, 1_100));
+await assert.rejects(
+  manager.write({
+    workspaceId: "workspace-a",
+    sessionId: background.sessionId,
+    yieldTimeMs: 1,
+  }),
+  /Unknown process session/,
+);
+
 const interactive = await manager.start({
   workspaceId: "workspace-a",
   cwd: process.cwd(),

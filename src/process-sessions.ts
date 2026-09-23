@@ -8,7 +8,7 @@ const MAX_COMMAND_YIELD_MS = 30_000;
 const MAX_POLL_YIELD_MS = 110_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 10_000;
 const DEFAULT_BUFFER_CHARACTERS = 1_000_000;
-const COMPLETED_SESSION_TTL_MS = 5 * 60 * 1_000;
+const COMPLETED_SESSION_TTL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
 const MAX_PROCESS_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
@@ -287,7 +287,6 @@ export class ProcessSessionManager {
     }
 
     const snapshot = this.consume(session, input.maxOutputTokens);
-    if (!session.running) this.removeSession(session.id);
     return snapshot;
   }
 

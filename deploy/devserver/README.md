@@ -17,7 +17,7 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
   `/srv/devserver/runtime/cloudflared`.
 - Only `/home/ubuntu/work` is exposed as an allowed workspace root.
 - Subagent delegation is available only through DevSpace's configured Codex
-  provider. The deployed config locks Codex to `gpt-5.6-luna` with `max`
+  provider. The deployed config locks Codex to `gpt-6-luna` with `max`
   reasoning, rejects model or effort overrides, and admits at most two
   concurrent turns in FIFO order. Codex's own thread scheduler is also capped
   at two threads per session. DevSpace automatically approves all Codex
@@ -83,7 +83,10 @@ conversations. `bash` is resumable: it returns a process session after a
 five-second yield instead of holding one MCP request open for multi-minute tests
 or builds, and the host continues it through `write_stdin`. The
 `exec_command`/`write_stdin` pair is also available for hosts that already know
-the Codex-compatible process lifecycle.
+the Codex-compatible process lifecycle. Completed process sessions remain
+retryable for 24 hours and are not removed after the first completed
+`write_stdin` response, so a lost or duplicated MCP response can be recovered by
+continuing the same session instead of receiving `Unknown process session`.
 The 100 GiB ext4 filesystem mounted at `/srv/devserver` is the hard capacity
 boundary for the complete DevServer runtime, including images, logs, home,
 workspaces, caches, and `/tmp`. The container root filesystem stays read-only,
@@ -181,7 +184,7 @@ the same non-interactive execution policy, two concurrent agent threads by
 default, and a
 trusted workspace parent. Mac-only notification commands, plugin cache paths,
 and macOS project paths are intentionally omitted. DevSpace still passes its
-strict `gpt-5.6-luna` / `max` selection explicitly for every bounded subagent
+strict `gpt-6-luna` / `max` selection explicitly for every bounded subagent
 thread and turn.
 
 Set `DEVSERVER_CODEX_MAX_CONCURRENT_THREADS` when running the configuration
