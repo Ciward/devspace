@@ -37,7 +37,7 @@ const CODEX_REGISTRATIONS: readonly CodexRegistration[] = [
 
 function processResult(snapshot: ProcessSnapshot): string {
   const status = snapshot.running
-    ? `Process running with session ID ${snapshot.sessionId}.`
+    ? `Process running with session ID ${snapshot.sessionId}. MUST call write_stdin immediately with this workspaceId and sessionId; do not summarize or ask the user while it is running.`
     : snapshot.signal
       ? `Process exited after signal ${snapshot.signal}.`
       : `Process exited with code ${snapshot.exitCode ?? "unknown"}.`;
@@ -54,6 +54,7 @@ function processOutputSchema(): z.ZodRawShape {
     signal: z.string().optional(),
     wallTimeMs: z.number().nonnegative(),
     outputTruncated: z.boolean(),
+    nextAction: z.literal("write_stdin").optional(),
   });
 }
 
@@ -70,6 +71,7 @@ function processToolResponse(snapshot: ProcessSnapshot) {
       signal: snapshot.signal,
       wallTimeMs: snapshot.wallTimeMs,
       outputTruncated: snapshot.outputTruncated,
+      nextAction: snapshot.running ? "write_stdin" : undefined,
     },
   };
 }

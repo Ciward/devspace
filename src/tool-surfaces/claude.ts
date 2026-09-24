@@ -291,12 +291,13 @@ function processOutputSchema(): z.ZodRawShape {
     timedOut: z.boolean().optional(),
     wallTimeMs: z.number().nonnegative(),
     outputTruncated: z.boolean(),
+    nextAction: z.literal("write_stdin").optional(),
   });
 }
 
 function processToolResponse(snapshot: ProcessSnapshot) {
   const status = snapshot.running
-    ? `Process running with session ID ${snapshot.sessionId}. Call write_stdin with this workspaceId and sessionId to continue.`
+    ? `Process running with session ID ${snapshot.sessionId}. MUST call write_stdin immediately with this workspaceId and sessionId; do not summarize or ask the user while it is running.`
     : snapshot.timedOut
       ? "Process timed out."
       : snapshot.signal
@@ -317,6 +318,7 @@ function processToolResponse(snapshot: ProcessSnapshot) {
       timedOut: snapshot.timedOut,
       wallTimeMs: snapshot.wallTimeMs,
       outputTruncated: snapshot.outputTruncated,
+      nextAction: snapshot.running ? "write_stdin" : undefined,
     },
   };
 }

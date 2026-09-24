@@ -16,7 +16,7 @@ import {
 } from "./shared.js";
 
 export function fullInstructions({ agents, skills }: ToolInstructionContext): string {
-  return `${agents}${skills}Use read, grep, glob, and ls for inspection; edit for targeted changes; write only for new files or complete rewrites; bash for short commands; exec_command for long commands; and write_stdin to continue running processes. When bash or exec_command returns a sessionId, call write_stdin until completion and do not rerun the command merely because it is still running. Git lifecycle writes needed to finish the user's task are allowed.`;
+  return `${agents}${skills}Use read, grep, glob, and ls for inspection; edit for targeted changes; write only for new files or complete rewrites; bash for short commands; exec_command for long commands; and write_stdin to continue running processes. When bash or exec_command returns running=true with a sessionId, immediately call write_stdin with that sessionId until completion; do not summarize, ask the user, or start another task while it is still running. Git lifecycle writes needed to finish the user's task are allowed.`;
 }
 
 export function registerFullTools(context: ToolRegistrationContext): void {
