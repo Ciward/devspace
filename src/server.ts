@@ -1148,6 +1148,7 @@ export function createServer(
       } else if (initializeRequest) {
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
+          enableJsonResponse: config.mcpJsonResponses,
           onsessioninitialized: (newSessionId) => {
             if (transport) {
               transports.register(newSessionId, transport);

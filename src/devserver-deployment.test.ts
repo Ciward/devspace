@@ -118,6 +118,7 @@ assert.match(compose, /DEVSPACE_RESUMABLE_BASH_YIELD_MS:\s*"5000"/);
 assert.match(compose, /DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_MS:\s*"1800000"/);
 assert.match(compose, /DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_MS:\s*"30000"/);
 assert.match(compose, /DEVSPACE_MCP_SESSION_MAX_COUNT:\s*"1024"/);
+assert.match(compose, /DEVSPACE_MCP_JSON_RESPONSES:\s*"1"/);
 assert.match(compose, /DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS:\s*"2"/);
 assert.match(compose, /cpus:\s*6\.0/);
 assert.match(compose, /mem_limit:\s*18g/);

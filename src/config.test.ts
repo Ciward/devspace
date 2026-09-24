@@ -25,6 +25,7 @@ try {
   assert.equal((defaults as unknown as Record<string, unknown>).mcpSessionIdleTimeoutMs, 24 * 60 * 60 * 1_000);
   assert.equal((defaults as unknown as Record<string, unknown>).mcpSessionCleanupIntervalMs, 5 * 60 * 1_000);
   assert.equal((defaults as unknown as Record<string, unknown>).mcpSessionMaxCount, 1_024);
+  assert.equal(defaults.mcpJsonResponses, false);
   assert.equal((defaults as unknown as Record<string, unknown>).subagentMaxConcurrentTurns, 4);
   assert.deepEqual(defaults.subagents, { enabled: false, providers: [], maxConcurrentTurns: 4 });
   assert.deepEqual(defaults.logging, {
@@ -133,11 +134,13 @@ try {
     DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_MS: "300000",
     DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_MS: "30000",
     DEVSPACE_MCP_SESSION_MAX_COUNT: "128",
+    DEVSPACE_MCP_JSON_RESPONSES: "1",
     DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS: "2",
   });
   assert.equal((limited as unknown as Record<string, unknown>).mcpSessionIdleTimeoutMs, 300_000);
   assert.equal((limited as unknown as Record<string, unknown>).mcpSessionCleanupIntervalMs, 30_000);
   assert.equal((limited as unknown as Record<string, unknown>).mcpSessionMaxCount, 128);
+  assert.equal(limited.mcpJsonResponses, true);
   assert.equal((limited as unknown as Record<string, unknown>).subagentMaxConcurrentTurns, 2);
   assert.equal(limited.host, "0.0.0.0");
   assert.equal(limited.port, 6767);

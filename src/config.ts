@@ -19,6 +19,7 @@ export interface ServerConfig {
   mcpSessionIdleTimeoutMs: number;
   mcpSessionCleanupIntervalMs: number;
   mcpSessionMaxCount: number;
+  mcpJsonResponses: boolean;
   toolMode: ToolMode;
   resumableBash: boolean;
   resumableBashYieldMs: number;
@@ -120,6 +121,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       1,
       10_000,
     ),
+    mcpJsonResponses: env.DEVSPACE_MCP_JSON_RESPONSES === undefined
+      ? stored.server.mcpJsonResponses
+      : parseBoolean(env.DEVSPACE_MCP_JSON_RESPONSES),
     toolMode: parseToolMode(env.DEVSPACE_TOOL_MODE, stored.tools.mode),
     resumableBash: env.DEVSPACE_RESUMABLE_BASH === undefined
       ? stored.tools.resumableBash

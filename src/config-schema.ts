@@ -14,6 +14,7 @@ const serverConfigSchema = z.object({
   mcpSessionIdleTimeoutMs: z.number().int().min(30_000).max(24 * 60 * 60 * 1_000).default(24 * 60 * 60 * 1_000),
   mcpSessionCleanupIntervalMs: z.number().int().min(1_000).max(60 * 60 * 1_000).default(5 * 60 * 1_000),
   mcpSessionMaxCount: z.number().int().min(1).max(10_000).default(1_024),
+  mcpJsonResponses: z.boolean().default(false),
 }).strict().prefault({});
 
 const workspacesConfigSchema = z.object({

@@ -22,6 +22,7 @@ const config: ServerConfig = {
   mcpSessionIdleTimeoutMs: 300_000,
   mcpSessionCleanupIntervalMs: 30_000,
   mcpSessionMaxCount: 128,
+  mcpJsonResponses: false,
   allowedRoots: [
     "/Users/alice/work",
     "/Users/alice/personal/open-source",
