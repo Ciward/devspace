@@ -120,6 +120,27 @@ never be committed, printed in logs, or copied into the Compose environment.
 `prepare-tmp-storage.sh` remains only as a compatibility alias for
 `install-isolated-runtime.sh`; it no longer creates a loop image.
 
+## Connection diagnostics
+
+`devserver-connection-monitor.timer` records one JSON line per minute at
+`/srv/devserver/runtime/monitor/connection-monitor.ndjson`. Each record correlates
+local and public health, container restarts/OOM, cgroup memory and PID pressure,
+disk use, recent MCP/tool calls, response closures before `finish`, and
+Cloudflare `context canceled`/proxy failures. This monitor only observes and
+never restarts a workload. Inspect it with:
+
+```bash
+sudo systemctl status devserver-connection-monitor.timer
+sudo journalctl -u devserver-connection-monitor.service --since today
+sudo tail -n 20 /srv/devserver/runtime/monitor/connection-monitor.ndjson
+```
+
+A `mcp_response_closed_before_finish` event proves the HTTP response was closed
+before DevServer finished it. If the last successful `tool_call` is followed by
+no new `/mcp` request and no lifecycle event, the server stayed healthy while
+the MCP host stopped issuing the next request; DevServer cannot observe the
+ChatGPT Web UI reason, but the monitor preserves the exact boundary evidence.
+
 ## Automatic stability maintenance
 
 `devserver-maintenance.timer` runs five minutes after boot and every five minutes

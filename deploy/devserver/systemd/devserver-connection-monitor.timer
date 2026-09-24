@@ -1,0 +1,13 @@
+[Unit]
+Description=Record DevServer MCP diagnostics every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+RandomizedDelaySec=10s
+AccuracySec=10s
+Persistent=true
+Unit=devserver-connection-monitor.service
+
+[Install]
+WantedBy=timers.target

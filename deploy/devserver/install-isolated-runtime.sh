@@ -42,6 +42,7 @@ install -m 0644 "$SCRIPT_DIR/runtime/containerd.toml" "$CONFIG_ROOT/containerd.t
 install -m 0644 "$SCRIPT_DIR/runtime/daemon.json" "$CONFIG_ROOT/daemon.json"
 install -m 0755 "$SCRIPT_DIR/devserver-network.sh" /usr/local/libexec/devserver-network.sh
 install -m 0755 "$SCRIPT_DIR/devserver-maintenance.sh" /usr/local/libexec/devserver-maintenance.sh
+install -m 0755 "$SCRIPT_DIR/devserver-connection-monitor.sh" /usr/local/libexec/devserver-connection-monitor.sh
 
 dockerd --validate --config-file "$CONFIG_ROOT/daemon.json" >/dev/null
 containerd --config "$CONFIG_ROOT/containerd.toml" config dump >/dev/null
@@ -53,7 +54,9 @@ for unit in \
   devserver-health-proxy.socket \
   devserver-health-proxy.service \
   devserver-maintenance.service \
-  devserver-maintenance.timer; do
+  devserver-maintenance.timer \
+  devserver-connection-monitor.service \
+  devserver-connection-monitor.timer; do
   install -m 0644 "$SCRIPT_DIR/systemd/$unit" "/etc/systemd/system/$unit"
 done
 
@@ -74,7 +77,7 @@ systemctl enable devserver-network.service devserver-health-proxy.socket devserv
 systemctl restart devserver-network.service
 systemctl reset-failed devserver-health-proxy.socket
 systemctl restart devserver-health-proxy.socket
-systemctl enable --now devserver-maintenance.timer
+systemctl enable --now devserver-maintenance.timer devserver-connection-monitor.timer
 
 printf 'DevServer isolated runtime ready: device=%s root=%s socket=%s\n' \
   "$actual_source" "$STORAGE_ROOT" /run/docker-devserver.sock

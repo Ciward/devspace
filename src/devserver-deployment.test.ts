@@ -77,6 +77,18 @@ const maintenanceTimer = await readFile(
   new URL("../deploy/devserver/systemd/devserver-maintenance.timer", import.meta.url),
   "utf8",
 );
+const connectionMonitor = await readFile(
+  new URL("../deploy/devserver/devserver-connection-monitor.sh", import.meta.url),
+  "utf8",
+);
+const connectionMonitorService = await readFile(
+  new URL("../deploy/devserver/systemd/devserver-connection-monitor.service", import.meta.url),
+  "utf8",
+);
+const connectionMonitorTimer = await readFile(
+  new URL("../deploy/devserver/systemd/devserver-connection-monitor.timer", import.meta.url),
+  "utf8",
+);
 
 const scriptsCopy = dockerfile.indexOf("COPY scripts ./scripts");
 const pnpmInstall = dockerfile.indexOf("RUN pnpm install --frozen-lockfile");
@@ -262,7 +274,7 @@ assert.match(codexConfig, /model_auto_compact_token_limit = 900000/);
 assert.match(codexConfig, /model_provider = "OpenAI"/);
 assert.match(codexConfig, /base_url = "https:\/\/api\.tokenlab\.cc\.cd"/);
 assert.match(codexConfig, /\[orchestrator\]/);
-assert.match(codexConfig, /default_subagent_model = "gpt-5\.6-luna"/);
+assert.match(codexConfig, /default_subagent_model = "gpt-6-luna"/);
 assert.match(codexConfig, /default_subagent_reasoning_effort = "max"/);
 assert.match(codexConfig, /DEVSERVER_CODEX_MAX_CONCURRENT_THREADS:-2/);
 assert.match(codexConfig, /max_concurrent_threads_per_session = %s/);

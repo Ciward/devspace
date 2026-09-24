@@ -1009,10 +1009,45 @@ export function createServer(
   app.use((req, res, next) => {
     const requestId = randomUUID();
     const startedAt = performance.now();
+    const path = requestPath(req);
+    const isMcpRequest = path === "/mcp";
+    let requestAborted = false;
+    let responseFinished = false;
+    let responseClosedBeforeFinish = false;
     res.locals.requestId = requestId;
 
+    if (isMcpRequest) {
+      req.on("aborted", () => {
+        requestAborted = true;
+        logEvent(config.logging, "warn", "mcp_request_aborted", {
+          requestId,
+          method: req.method,
+          path,
+          durationMs: Math.round(performance.now() - startedAt),
+          requestComplete: req.complete,
+          requestDestroyed: req.destroyed,
+          ...requestLogFields(req, config),
+        });
+      });
+      res.on("close", () => {
+        if (responseFinished) return;
+        responseClosedBeforeFinish = true;
+        logEvent(config.logging, "warn", "mcp_response_closed_before_finish", {
+          requestId,
+          method: req.method,
+          path,
+          durationMs: Math.round(performance.now() - startedAt),
+          requestComplete: req.complete,
+          requestDestroyed: req.destroyed,
+          responseWritableEnded: res.writableEnded,
+          responseWritableFinished: res.writableFinished,
+          ...requestLogFields(req, config),
+        });
+      });
+    }
+
     res.on("finish", () => {
-      const path = requestPath(req);
+      responseFinished = true;
       if (!config.logging.requests) return;
       if (!config.logging.assets && path.startsWith("/mcp-app-assets")) return;
 
@@ -1022,6 +1057,13 @@ export function createServer(
         path,
         status: res.statusCode,
         durationMs: Math.round(performance.now() - startedAt),
+        ...(isMcpRequest
+          ? {
+              requestAborted,
+              responseClosedBeforeFinish,
+              requestComplete: req.complete,
+            }
+          : {}),
         ...requestLogFields(req, config),
       });
     });
