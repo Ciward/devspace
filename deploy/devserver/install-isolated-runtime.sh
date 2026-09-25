@@ -43,6 +43,7 @@ install -m 0644 "$SCRIPT_DIR/runtime/daemon.json" "$CONFIG_ROOT/daemon.json"
 install -m 0755 "$SCRIPT_DIR/devserver-network.sh" /usr/local/libexec/devserver-network.sh
 install -m 0755 "$SCRIPT_DIR/devserver-maintenance.sh" /usr/local/libexec/devserver-maintenance.sh
 install -m 0755 "$SCRIPT_DIR/devserver-connection-monitor.sh" /usr/local/libexec/devserver-connection-monitor.sh
+install -m 0755 "$SCRIPT_DIR/devserver-send-reminder.py" /usr/local/libexec/devserver-send-reminder.py
 
 dockerd --validate --config-file "$CONFIG_ROOT/daemon.json" >/dev/null
 containerd --config "$CONFIG_ROOT/containerd.toml" config dump >/dev/null
