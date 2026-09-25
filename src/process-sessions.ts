@@ -55,6 +55,8 @@ interface ManagedProcess {
 
 interface ProcessSession {
   id: number;
+  lastPolledAt?: number;
+  resultCollected?: boolean;
   workspaceId: string;
   process?: ManagedProcess;
   startedAt: number;
@@ -259,6 +261,7 @@ export class ProcessSessionManager {
 
   async write(input: WriteStdinInput): Promise<ProcessSnapshot> {
     const session = this.getOwnedSession(input.workspaceId, input.sessionId);
+    session.lastPolledAt = Date.now();
     const chars = input.chars ?? "";
     const interactionRequested =
       chars.length > 0 || input.columns !== undefined || input.rows !== undefined;
@@ -293,6 +296,17 @@ export class ProcessSessionManager {
   terminate(workspaceId: string, sessionId: number): void {
     const session = this.getOwnedSession(workspaceId, sessionId);
     if (session.running) session.process?.kill("SIGTERM");
+  }
+
+  pendingContinuations() {
+    return [...this.sessions.values()]
+      .filter((session) => session.lastPolledAt !== undefined && !session.resultCollected)
+      .map((session) => ({
+        sessionId: session.id,
+        workspaceId: session.workspaceId,
+        lastPolledAt: session.lastPolledAt,
+        running: session.running,
+      }));
   }
 
   shutdown(): void {
@@ -430,6 +444,8 @@ export class ProcessSessionManager {
   }
 
   private consume(session: ProcessSession, maxOutputTokens?: number): ProcessSnapshot {
+    session.lastPolledAt = Date.now();
+    session.resultCollected = !session.running;
     const limit = boundedInteger(maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, 100_000);
     const maxCharacters = Math.max(256, limit * 4);
     const buffered = session.buffer.drain(maxCharacters);

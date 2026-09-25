@@ -46,6 +46,16 @@ export function logToolCall(config: ServerConfig, fields: ToolLogFields): void {
   });
 }
 
+function processResultMetadata(result: unknown): Pick<ToolLogFields, "running" | "sessionId" | "nextAction"> {
+  if (!result || typeof result !== "object") return {};
+  const value = result as Record<string, unknown>;
+  return {
+    ...(typeof value.running === "boolean" ? { running: value.running } : {}),
+    ...(typeof value.sessionId === "number" ? { sessionId: value.sessionId } : {}),
+    ...(typeof value.nextAction === "string" ? { nextAction: value.nextAction } : {}),
+  };
+}
+
 export async function runLoggedToolOperation<T>(
   config: ServerConfig,
   fields: Omit<ToolLogFields, "success" | "durationMs" | "error">,
@@ -54,8 +64,10 @@ export async function runLoggedToolOperation<T>(
 ): Promise<T> {
   try {
     const result = await operation();
+    const metadata = processResultMetadata(result);
     logToolCall(config, {
       ...fields,
+      ...metadata,
       success: true,
       durationMs: Math.round(performance.now() - startedAt),
     });

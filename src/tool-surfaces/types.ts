@@ -59,6 +59,9 @@ export interface ToolLogFields {
   success: boolean;
   durationMs: number;
   error?: string;
+  running?: boolean;
+  sessionId?: number;
+  nextAction?: string;
 }
 
 export interface DiffStats {

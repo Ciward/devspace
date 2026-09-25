@@ -141,6 +141,24 @@ no new `/mcp` request and no lifecycle event, the server stayed healthy while
 the MCP host stopped issuing the next request; DevServer cannot observe the
 ChatGPT Web UI reason, but the monitor preserves the exact boundary evidence.
 
+邮件提醒复用 TokenLab 主机上的 SMTP 设置，由 `ciwardauto@163.com` 发往
+`ciwardsmith@gmail.com`。授权码只在主机发送进程内使用。
+在 `/etc/default/devserver-connection-monitor` 设置：
+
+```sh
+DEVSERVER_INTERRUPTION_ALERT_ENABLED=1
+DEVSERVER_INTERRUPTION_ALERT_TO=ciwardsmith@gmail.com
+DEVSERVER_INTERRUPTION_ALERT_GRACE_SECONDS=300
+DEVSERVER_INTERRUPTION_ALERT_COOLDOWN_SECONDS=1800
+```
+
+默认只在后台进程已经结束、终态尚未领取、全局工具活动静默达到阈值且
+本机/公网健康时提醒。仍在运行、正在轮询、快照超过 60 秒、服务异常时不发信。
+这是“需要续接”的证据，不是浏览器内部故障的证明；GET/SSE 关闭不作为告警条件。
+每个服务启动标识和进程 ID 组合只发送一次，发送前持久化 claim；结果不明不自动重发。
+收到终态后快照自动清除待续接状态；服务重启不会复用旧启动标识。
+全局冷却默认 30 分钟，收件地址可配置。快照不包含命令或输出，提醒不会消耗模型 token。
+
 ## Automatic stability maintenance
 
 `devserver-maintenance.timer` runs five minutes after boot and every five minutes

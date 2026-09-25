@@ -6,6 +6,7 @@ readonly STORAGE_ROOT="${DEVSERVER_STORAGE_ROOT:-/srv/devserver}"
 readonly DOCKER_SOCKET="${DEVSERVER_DOCKER_SOCKET:-unix:///run/docker-devserver.sock}"
 readonly STATE_ROOT="${DEVSERVER_CONNECTION_MONITOR_STATE_ROOT:-$STORAGE_ROOT/runtime/monitor}"
 readonly LOG_FILE="$STATE_ROOT/connection-monitor.ndjson"
+readonly CONTINUATION_FILE="${DEVSERVER_CONTINUATION_FILE:-$STORAGE_ROOT/runtime/home/.local/share/devspace/pending-continuations.json}"
 readonly LOCK_FILE="${DEVSERVER_CONNECTION_MONITOR_LOCK_FILE:-/run/lock/devserver-connection-monitor.lock}"
 readonly PUBLIC_HEALTH_URL="${DEVSERVER_PUBLIC_HEALTH_URL:-https://devserver.ciward.dpdns.org/healthz}"
 readonly WINDOW="${DEVSERVER_CONNECTION_MONITOR_WINDOW:-90s}"
@@ -93,6 +94,46 @@ memory_events="$(read_cgroup_value memory.events | tr '\n' ';')"
 swap_current="$(read_cgroup_value memory.swap.current)"
 pids_current="$(read_cgroup_value pids.current)"
 pids_max="$(read_cgroup_value pids.max)"
+
+maybe_send_interruption_alert() {
+  [[ "${DEVSERVER_INTERRUPTION_ALERT_ENABLED:-0}" == "1" ]] || return 0
+  [[ "$local_http" == 200 && "$public_http" == 200 && "$container_health" == healthy && "$container_oom" == false ]] || return 0
+  [[ "$app_5xx" == 0 && "$app_mcp_errors" == 0 && "$tunnel_connection_terminated" == 0 ]] || return 0
+  [[ -r "$CONTINUATION_FILE" ]] || return 0
+  local recipient="${DEVSERVER_INTERRUPTION_ALERT_TO:-ciwardsmith@gmail.com}"
+  local grace="${DEVSERVER_INTERRUPTION_ALERT_GRACE_SECONDS:-300}"
+  local cooldown="${DEVSERVER_INTERRUPTION_ALERT_COOLDOWN_SECONDS:-1800}"
+  [[ "$grace" =~ ^[0-9]+$ && "$cooldown" =~ ^[0-9]+$ ]] || return 0
+  [[ "$recipient" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || return 0
+  local now candidate key workspace_id session_id age last_claim
+  now="$(date +%s)"
+  candidate="$(jq -cer --argjson now "$((now * 1000))" --argjson grace "$((grace * 1000))" '
+    select(.sampledAt <= $now and .sampledAt > ($now - 60000)) |
+    select(.activeToolRequests == 0 and ($now - .lastToolRequestAt) >= $grace) |
+    .bootId as $boot |
+    [.sessions[]? | select(.running == true and ($now - .lastPolledAt) >= $grace) |
+      {key: ($boot + ":" + (.sessionId|tostring)), workspaceId, sessionId,
+       age: (($now - .lastPolledAt)/1000|floor)}] | first // empty' "$CONTINUATION_FILE" 2>/dev/null)" || return 0
+  key="$(jq -r .key <<< "$candidate")"
+  workspace_id="$(jq -r .workspaceId <<< "$candidate")"
+  session_id="$(jq -r .sessionId <<< "$candidate")"
+  age="$(jq -r .age <<< "$candidate")"
+  local claims="$STATE_ROOT/interruption-alert.claims"
+  if [[ -r "$claims" ]]; then
+    grep -Fq " $key" "$claims" && return 0
+    last_claim="$(tail -1 "$claims" | awk '{print $1}')"
+    (( now - last_claim >= cooldown )) || return 0
+  fi
+  # Claim before SMTP: ambiguous delivery must not trigger duplicate emails.
+  printf '%s %s\n' "$now" "$key" >> "$claims"
+  chmod 0600 "$claims"
+  if python3 "$(dirname "$0")/devserver-send-reminder.py" "$recipient" "$workspace_id" "$session_id" "$age" "$key"; then
+    log "interruption reminder smtp_accepted key=$key"
+  else
+    log "interruption reminder delivery_unknown key=$key; claim retained"
+  fi
+}
+maybe_send_interruption_alert
 
 jq -cn \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

@@ -100,6 +100,7 @@ const background = await manager.start({
 assert.equal(background.running, true);
 assert.ok(background.sessionId);
 assert.equal(typeof background.sessionId, "number");
+assert.equal(manager.pendingContinuations().some(s => s.sessionId === background.sessionId), true);
 
 await assert.rejects(
   manager.write({
@@ -118,6 +119,7 @@ const completed = await manager.write({
 assert.equal(completed.running, false);
 assert.equal(completed.exitCode, 0);
 assert.match(completed.output, /finished/);
+assert.equal(manager.pendingContinuations().some(s => s.sessionId === background.sessionId), false);
 
 const retriedCompleted = await manager.write({
   workspaceId: "workspace-a",

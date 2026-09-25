@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
-import { readFileSync, type Dirent } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, type Dirent } from "node:fs";
+import { join } from "node:path";
 import { access, readdir, realpath, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -944,6 +945,22 @@ export function createServer(
   const workspaces = new WorkspaceRegistry(config, workspaceStore);
   const reviewCheckpoints = createReviewCheckpointManager();
   const processSessions = new ProcessSessionManager();
+  const bootId = randomUUID();
+  let lastToolRequestAt = Date.now();
+  let activeToolRequests = 0;
+  const continuationTimer = setInterval(() => {
+    const target = join(config.stateDir, "pending-continuations.json");
+    try {
+      writeFileSync(`${target}.tmp`, JSON.stringify({
+        bootId, sampledAt: Date.now(), lastToolRequestAt, activeToolRequests,
+        sessions: processSessions.pendingContinuations(),
+      }), { mode: 0o600 });
+      renameSync(`${target}.tmp`, target);
+    } catch {
+      logEvent(config.logging, "warn", "continuation_snapshot_failed");
+    }
+  }, 15_000);
+  continuationTimer.unref();
   const localAgentProviders = buildLocalAgentProviderStatuses(
     config.subagents,
     getLocalAgentProviderAvailabilitySnapshot(),
@@ -1011,6 +1028,19 @@ export function createServer(
     const startedAt = performance.now();
     const path = requestPath(req);
     const isMcpRequest = path === "/mcp";
+    if (isMcpRequest && req.method === "POST" && req.body?.method === "tools/call") {
+      lastToolRequestAt = Date.now();
+      activeToolRequests += 1;
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        activeToolRequests -= 1;
+        lastToolRequestAt = Date.now();
+      };
+      res.once("finish", release);
+      res.once("close", release);
+    }
     let requestAborted = false;
     let responseFinished = false;
     let responseClosedBeforeFinish = false;
@@ -1212,6 +1242,7 @@ export function createServer(
     close: () => {
       closePromise ??= (async () => {
         clearInterval(sessionCleanupTimer);
+        clearInterval(continuationTimer);
         const results = await transports.closeAll();
         logSessionCloseResults("server_shutdown", results);
         processSessions.shutdown();
