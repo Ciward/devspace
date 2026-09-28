@@ -82,7 +82,7 @@ trap 'rm -f "$config_tmp" "$auth_tmp"' EXIT
   printf 'base_url = "https://api.tokenlab.cc.cd"\n'
   printf 'experimental_bearer_token = "%s"\n\n' "$api_key"
   printf '[orchestrator]\n'
-  printf 'default_subagent_model = "gpt-5.6-luna"\n'
+  printf 'default_subagent_model = "gpt-6-luna"\n'
   printf 'default_subagent_reasoning_effort = "max"\n\n'
   printf '[agents]\n'
   printf 'max_concurrent_threads_per_session = %s\n\n' "$MAX_CONCURRENT_THREADS"

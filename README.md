@@ -30,7 +30,7 @@ This branch:
 
 - permits only configured DevSpace Subagent providers and rejects model or
   effort overrides when `allowOverrides` is `false`
-- deploys with Codex fixed to `gpt-5.6-luna` and `max` reasoning
+- deploys with Codex fixed to `gpt-6-luna` and `max` reasoning
 - automatically approves every Codex app-server command, file-change, and
   permission request, including SSH and production deployment commands
 - runs every configured Codex turn with `danger-full-access`, including turns

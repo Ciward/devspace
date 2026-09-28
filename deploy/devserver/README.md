@@ -226,6 +226,29 @@ and macOS project paths are intentionally omitted. DevSpace still passes its
 strict `gpt-6-luna` / `max` selection explicitly for every bounded subagent
 thread and turn.
 
+The persistent DevServer `~/.devspace/config.jsonc` must keep the same strict
+selection for the configured Codex provider:
+
+```jsonc
+{
+  "subagents": {
+    "enabled": true,
+    "providers": [
+      {
+        "id": "codex",
+        "enabled": true,
+        "model": "gpt-6-luna",
+        "effort": "max",
+        "allowOverrides": false,
+      },
+    ],
+  },
+}
+```
+
+This is separate from the top-level Codex orchestrator model above: it
+controls every bounded `devspace agents` subagent exposed by DevServer.
+
 Set `DEVSERVER_CODEX_MAX_CONCURRENT_THREADS` when running the configuration
 script to choose a value from 1 to 32. DevSpace independently limits active
 subagent turns through `DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS`; DevServer uses
