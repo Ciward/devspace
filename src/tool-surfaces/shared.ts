@@ -61,14 +61,16 @@ export async function runLoggedToolOperation<T>(
   fields: Omit<ToolLogFields, "success" | "durationMs" | "error">,
   startedAt: number,
   operation: () => Promise<T>,
+  resultFields?: (result: T) => Partial<ToolLogFields>,
 ): Promise<T> {
   try {
     const result = await operation();
-    const metadata = processResultMetadata(result);
+    const resultMetadata = resultFields?.(result);
     logToolCall(config, {
       ...fields,
-      ...metadata,
-      success: true,
+      ...processResultMetadata(result),
+      ...resultMetadata,
+      success: resultMetadata?.success ?? true,
       durationMs: Math.round(performance.now() - startedAt),
     });
     return result;

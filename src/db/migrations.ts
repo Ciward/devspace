@@ -47,6 +47,16 @@ const migrations: Migration[] = [
     name: "workspace-and-local-agent-state-convergence",
     up: migrateWorkspaceAndLocalAgentStateConvergence,
   },
+  {
+    version: 9,
+    name: "workspace-recovery-state",
+    up: migrateWorkspaceRecoveryState,
+  },
+  {
+    version: 10,
+    name: "local-agent-turns",
+    up: migrateLocalAgentTurns,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -59,15 +69,37 @@ export function migrateDatabase(sqlite: Database.Database): void {
       );
     `);
 
-    const applied = new Set(
-      (
-        sqlite.prepare("select version from devspace_schema_migrations").all() as Array<{
-          version: number;
-        }>
-      ).map((row) => row.version),
-    );
+    const appliedRows = sqlite
+      .prepare("select version, name from devspace_schema_migrations order by version")
+      .all() as Array<{ version: number; name: string }>;
+    const migrationsByVersion = new Map(migrations.map((migration) => [migration.version, migration]));
+    // The public branch used these numbers before Cheap added archive state.
+    // Replay the idempotent convergence steps only for this known lineage.
+    const upstreamNames = new Map([
+      [4, "workspace-conversation-bindings"],
+      [5, "local-agent-structured-errors"],
+      [6, "local-agent-effort-rename"],
+      [7, "workspace-recovery-state"],
+      [8, "local-agent-turns"],
+    ]);
+    for (const row of appliedRows) {
+      const expected = migrationsByVersion.get(row.version);
+      if (!expected) {
+        throw new Error(
+          `Database migration history is incompatible: version ${row.version} (${JSON.stringify(row.name)}) is unknown to this build.`,
+        );
+      }
+      if (row.name !== expected.name && row.name !== upstreamNames.get(row.version)) {
+        throw new Error(
+          `Database migration history is incompatible: version ${row.version} is recorded as ${JSON.stringify(row.name)}, but this build expects ${JSON.stringify(expected.name)}.`,
+        );
+      }
+    }
+    const applied = new Set(appliedRows
+      .filter((row) => row.name === migrationsByVersion.get(row.version)?.name)
+      .map((row) => row.version));
     const recordMigration = sqlite.prepare(
-      "insert into devspace_schema_migrations (version, name, applied_at) values (?, ?, ?)",
+      "insert into devspace_schema_migrations (version, name, applied_at) values (?, ?, ?) on conflict(version) do update set name = excluded.name, applied_at = excluded.applied_at",
     );
 
     for (const migration of migrations) {
@@ -267,6 +299,39 @@ function migrateWorkspaceAndLocalAgentStateConvergence(sqlite: Database.Database
   migrateWorktreeArchiveState(sqlite);
   migrateLocalAgentStructuredErrors(sqlite);
   migrateLocalAgentEffortRename(sqlite);
+}
+
+function migrateWorkspaceRecoveryState(sqlite: Database.Database): void {
+  const workspaceStateExists = sqlite
+    .prepare("select 1 from sqlite_master where type = 'table' and name = 'workspace_sessions'")
+    .get();
+  if (!workspaceStateExists) return;
+
+  addColumnIfMissing(sqlite, "workspace_sessions", "recovery_kind", "text");
+}
+
+function migrateLocalAgentTurns(sqlite: Database.Database): void {
+  sqlite.exec(`
+    create table if not exists local_agent_turns (
+      id integer primary key autoincrement,
+      agent_id text not null,
+      prompt text not null,
+      status text not null,
+      response text,
+      error text,
+      error_code text,
+      error_retryable text,
+      created_at text not null,
+      completed_at text,
+      foreign key (agent_id) references local_agent_sessions(id) on delete cascade
+    );
+
+    create index if not exists local_agent_turns_agent_id_idx
+      on local_agent_turns(agent_id, id desc);
+
+    create index if not exists local_agent_turns_status_idx
+      on local_agent_turns(status);
+  `);
 }
 
 function addColumnIfMissing(

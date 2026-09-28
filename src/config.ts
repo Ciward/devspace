@@ -93,6 +93,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       scopes: parseStringList(env.DEVSPACE_OAUTH_SCOPES) ?? stored.oauth.scopes,
       allowedRedirectHosts: parseStringList(env.DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS)
         ?? stored.oauth.allowedRedirectHosts,
+      allowedResourceUrls: stored.oauth.allowedResourceUrls,
     },
     allowedRoots: normalizePaths(
       configuredAllowedRoots ?? stored.workspaces.allowedRoots,

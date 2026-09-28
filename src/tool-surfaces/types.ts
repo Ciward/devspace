@@ -22,7 +22,7 @@ export const toolNames = {
 export type ToolNames = typeof toolNames;
 
 export const workspaceIdDescription =
-  "Workspace to use. Reuse the current project's workspaceId.";
+  "Workspace to use. Reuse the current project's workspace_id.";
 
 export const WRITE_TOOL_ANNOTATIONS = {
   readOnlyHint: false,
@@ -56,11 +56,12 @@ export interface ToolLogFields {
   workingDirectory?: string;
   command?: string;
   commandLength?: number;
+  sessionId?: number;
+  running?: boolean;
+  exitCode?: number;
   success: boolean;
   durationMs: number;
   error?: string;
-  running?: boolean;
-  sessionId?: number;
   nextAction?: string;
 }
 
@@ -85,7 +86,7 @@ export interface ToolWidgetDescriptorMeta {
 }
 
 export interface ToolRegistrationContext {
-  server: McpServer;
+  server: Pick<McpServer, "registerTool" | "registerResource">;
   config: ServerConfig;
   workspaces: WorkspaceRegistry;
   processSessions: ProcessSessionManager;

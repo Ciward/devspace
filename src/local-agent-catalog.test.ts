@@ -8,6 +8,7 @@ import type { SubagentsConfig } from "./local-agent-config.js";
 
 const config: SubagentsConfig = {
   enabled: true,
+  instructions: "on-demand",
   providers: [
     { id: "codex", enabled: true, model: "gpt-default", effort: "medium" },
     { id: "claude", enabled: true, model: "sonnet" },
@@ -60,6 +61,7 @@ assert.equal(catalog.profiles[1]?.model, "gpt-custom");
 
 const strictConfig: SubagentsConfig = {
   enabled: true,
+  instructions: "on-demand",
   providers: [{
     id: "codex",
     enabled: true,

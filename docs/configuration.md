@@ -62,6 +62,8 @@ Run `devspace init` to create both files. `devspace config set publicBaseUrl
   "subagents": {
     "enabled": false,
     "maxConcurrentTurns": 4,
+
+    "instructions": "on-demand",
     "providers": [],
   },
   "logging": {
@@ -76,6 +78,7 @@ Run `devspace init` to create both files. `devspace config set publicBaseUrl
     "accessTokenTtlSeconds": 3600,
     "refreshTokenTtlSeconds": 2592000,
     "scopes": ["devspace"],
+    "allowedResourceUrls": [],
     "allowedRedirectHosts": ["chatgpt.com", "localhost", "127.0.0.1"],
   },
 }
@@ -84,6 +87,16 @@ Run `devspace init` to create both files. `devspace config set publicBaseUrl
 Omitted sections and keys use the defaults shown above. An empty
 `workspaces.allowedRoots` uses the current working directory. Unknown keys are
 rejected so spelling mistakes cannot silently alter behavior.
+
+`oauth.allowedResourceUrls` accepts exact alternate MCP resource URLs for
+clients that connect through a resource alias, such as a secure MCP tunnel.
+The normal `server.publicBaseUrl` `/mcp` resource remains allowed automatically.
+Configure the complete alias URL, not a hostname or origin; aliases do not
+change OAuth discovery URLs or proxy routing.
+Resource URLs must use HTTPS; HTTP is allowed only for `localhost`, `127.0.0.1`,
+or `[::1]`, with optional ports. Restart DevSpace after changing
+`oauth.allowedResourceUrls`: the provider reads this policy at server creation.
+After restarting, refresh tokens for removed aliases can no longer mint tokens.
 
 ## Tool modes and UI
 
@@ -99,10 +112,11 @@ rejected so spelling mistakes cannot silently alter behavior.
 after `tools.resumableBashYieldMs`. The host continues it with `write_stdin`
 instead of keeping one MCP request open for the whole command.
 
-`server.mcpSessionIdleTimeoutMs` closes abandoned transports,
-`server.mcpSessionCleanupIntervalMs` controls the cleanup scan, and
-`server.mcpSessionMaxCount` evicts the least recently active sessions when the
-cap is exceeded.
+`server.mcpSessionIdleTimeoutMs`, `server.mcpSessionCleanupIntervalMs`,
+`server.mcpSessionMaxCount`, and `server.mcpJsonResponses` remain accepted for
+configuration compatibility. The per-request MCP transport is now stateless,
+so these legacy transport controls no longer apply. Process sessions and
+subagent concurrency are managed independently.
 
 DevSpace attaches Apps UI metadata only to `open_workspace` and `show_changes`.
 This avoids rendering an iframe for every read, edit, search, or command call.
@@ -116,6 +130,11 @@ DevSpace discovers standard Agent Skills from `~/.agents/skills`, project
 `skills.agentDir/skills` and each path in `skills.paths`. Relative custom paths
 are resolved from the active workspace.
 
+When Subagents are enabled for MCP workspaces, DevSpace keeps its bundled
+`subagents` skill synchronized at `~/.devspace/skills/subagents/SKILL.md`.
+That managed copy is the authoritative `subagents` skill for DevSpace and is
+refreshed when the packaged skill changes.
+
 Subagent providers are explicit. Omitted providers are disabled:
 
 ```jsonc
@@ -124,6 +143,8 @@ Subagent providers are explicit. Omitted providers are disabled:
   "subagents": {
     "enabled": true,
     "maxConcurrentTurns": 2,
+
+    "instructions": "on-demand",
     "providers": [
       {
         "id": "codex",
@@ -131,6 +152,12 @@ Subagent providers are explicit. Omitted providers are disabled:
         "model": "gpt-5.4",
         "effort": "high",
         "allowOverrides": false,
+
+        "command": "/opt/devspace/bin/codex-wrapper",
+        "env": {
+          "CODEX_HOME": "/home/alice/.codex-work",
+          "OPENAI_BASE_URL": "https://api.example.com/v1",
+        },
       },
       {
         "id": "claude",
@@ -147,21 +174,51 @@ turns remain queued until a running turn releases a slot. When a provider sets
 `allowOverrides` to `false`, both `model` and `effort` are required and requests
 that try to change either value are rejected.
 
+`subagents.instructions` controls when ChatGPT receives the managed workflow:
+
+| Value | Behavior |
+| --- | --- |
+| `on-demand` | Default. `open_workspace` advertises the `subagents` skill and the model reads it only when the task benefits from delegation. |
+| `preload` | `open_workspace` includes the `subagents` workflow in its initial workspace instructions instead of advertising that skill for a separate read. |
+
+Both modes only make the workflow available; neither tells the model to prefer
+subagents for routine work.
+
 Profiles are loaded from `~/.devspace/agents/*.md` and project
 `.devspace/agents/*.md`. `devspace agents targets` prints the configured targets
 available in the current workspace.
 
-Provider executable discovery remains process-scoped. The supported overrides
-are `CODEX_COMMAND`, `CODEX_HOME`, `CLAUDE_COMMAND`, `CURSOR_COMMAND`,
-`COPILOT_COMMAND`, `GROK_COMMAND`, and `GROK_AGENT_PROFILE`. DevSpace does not
-persist provider credentials.
+`command` names one executable. DevSpace does not split shell arguments, so use
+a wrapper executable when startup needs fixed arguments. `env` maps environment
+variable names to literal string values and preserves empty strings. DevSpace
+does not expand `$NAME` references in these values.
+
+All subagent providers accept `env`. The daemon inherits its startup
+environment, then overlays the provider's `env` without mutating the daemon's
+process environment. OpenCode receives that environment on its managed server
+process; embedded Pi scopes it to its provider requests and command execution.
+
+Codex, Claude, Cursor, Copilot, and Grok also accept `command`. OpenCode and Pi
+do not expose a command override. For providers that support it, an explicit
+`command` wins over both the inherited command override and a command override
+placed in `env`.
+
+Existing process-level overrides remain supported: `CODEX_COMMAND`,
+`CODEX_HOME`, `CLAUDE_COMMAND`, `CURSOR_COMMAND`, `COPILOT_COMMAND`,
+`GROK_COMMAND`, and `GROK_AGENT_PROFILE`. Provider configuration takes
+precedence where the same value is set in both places.
+
+DevSpace writes `config.jsonc` with mode `0600`, but provider environment values
+are still plain text on disk. Keep the file out of version control. Leave
+credentials in the process environment if you do not want DevSpace to persist
+them.
 
 ## Native artifact download
 
 Set `artifacts.enabled` to `true` when a host needs to save a native attached or
 generated file into an open workspace. `artifacts.maxFileBytes` limits one
-streamed file. The secure publication path is currently available only on
-Linux; the tool is not registered on macOS, Windows, or BSD.
+streamed file. The secure publication path is available on Linux, macOS, and
+Windows; the tool is not registered on BSD.
 
 ## Environment boundary
 

@@ -10,6 +10,7 @@ import { LOCAL_AGENT_PROVIDERS } from "./local-agent-profiles.js";
 const legacyConfigSchema = z.object({
   host: z.string().optional(),
   port: z.number().optional(),
+  tool_mode: z.enum(["claude", "codex"]).optional(),
   allowedRoots: z.array(z.string()).optional(),
   publicBaseUrl: z.string().nullable().optional(),
   allowedHosts: z.array(z.string()).optional(),
@@ -34,6 +35,7 @@ const legacyConfigSchema = z.object({
 const LEGACY_CONFIG_KEYS = new Set([
   "host",
   "port",
+  "tool_mode",
   "allowedRoots",
   "publicBaseUrl",
   "allowedHosts",
@@ -74,7 +76,7 @@ export function migrateLegacyConfig(value: unknown): DevspaceConfig {
     }),
     storage: definedEntries({ stateDir: legacy.stateDir }),
     tools: definedEntries({
-      mode: legacy.tools?.mode,
+      mode: legacy.tools?.mode ?? legacy.tool_mode,
       resumableBash: legacy.tools?.resumableBash,
       resumableBashYieldMs: legacy.tools?.resumableBashYieldMs,
     }),

@@ -44,7 +44,7 @@ const OMX_AGENT_COMMANDS = new Set([
   "swarm",
   "team",
 ]);
-const DEVSPACE_AGENT_COMMANDS = new Set(["continue", "list", "ls", "run", "show", "targets"]);
+const DEVSPACE_AGENT_COMMANDS = new Set(["continue", "list", "ls", "run", "show", "targets", "wait"]);
 
 export function findWebOnlyCommandViolation(command: string): string | undefined {
   for (const nested of nestedShellCommands(command)) {

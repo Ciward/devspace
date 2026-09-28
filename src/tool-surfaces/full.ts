@@ -16,7 +16,7 @@ import {
 } from "./shared.js";
 
 export function fullInstructions({ agents, skills }: ToolInstructionContext): string {
-  return `${agents}${skills}Use read, grep, glob, and ls for inspection; edit for targeted changes; write only for new files or complete rewrites; bash for short commands; exec_command for long commands; and write_stdin to continue running processes. When bash or exec_command returns running=true with a sessionId, immediately call write_stdin with that sessionId until completion; do not summarize, ask the user, or start another task while it is still running. Git lifecycle writes needed to finish the user's task are allowed.`;
+  return `${agents}${skills}Use read, grep, glob, and ls for inspection; edit for targeted changes; write only for new files or complete rewrites; bash for short commands; exec_command for long commands; and write_stdin to continue running processes. When bash or exec_command returns running=true with a session_id, immediately call write_stdin with that session_id until completion; do not summarize, ask the user, or start another task while it is still running. Git lifecycle writes needed to finish the user's task are allowed.`;
 }
 
 export function registerFullTools(context: ToolRegistrationContext): void {
@@ -32,18 +32,18 @@ function registerSearchTools(context: ToolRegistrationContext): void {
     title: "Grep",
     description: "Search file contents in a workspace. Respects project ignore rules.",
     inputSchema: {
-      workspaceId: z.string().describe(workspaceIdDescription),
+      workspace_id: z.string().describe(workspaceIdDescription),
       pattern: z.string().describe("Search pattern."),
       path: z.string().optional().describe("Optional path or glob scope relative to the workspace root."),
       include: z.string().optional().describe("Optional include glob."),
     },
     outputSchema: resultOutputSchema(),
     annotations: { readOnlyHint: true },
-  }, async ({ workspaceId, ...input }) => {
+  }, async ({ workspace_id: workspaceId, ...input }) => {
     const startedAt = performance.now();
-    const workspace = workspaces.getWorkspace(workspaceId);
-    if (input.path) workspaces.resolvePath(workspace, input.path);
-    const response = await grepFilesTool(input, { cwd: workspace.root, root: workspace.root });
+    const workspace = await workspaces.getWorkspace(workspaceId);
+    if (input.path) await workspaces.resolvePath(workspace, input.path);
+    const response = await grepFilesTool(input, { cwd: workspace.root });
     if (response.isError) {
       logFailedToolResponse(config, { tool: toolNames.grep, workspaceId, path: input.path }, response.content, startedAt);
       return response;
@@ -56,17 +56,17 @@ function registerSearchTools(context: ToolRegistrationContext): void {
     title: "Glob",
     description: "Find files by glob pattern in a workspace. Respects project ignore rules.",
     inputSchema: {
-      workspaceId: z.string().describe(workspaceIdDescription),
+      workspace_id: z.string().describe(workspaceIdDescription),
       pattern: z.string().describe("File glob pattern."),
       path: z.string().optional().describe("Optional path scope relative to the workspace root."),
     },
     outputSchema: resultOutputSchema(),
     annotations: { readOnlyHint: true },
-  }, async ({ workspaceId, ...input }) => {
+  }, async ({ workspace_id: workspaceId, ...input }) => {
     const startedAt = performance.now();
-    const workspace = workspaces.getWorkspace(workspaceId);
-    if (input.path) workspaces.resolvePath(workspace, input.path);
-    const response = await findFilesTool(input, { cwd: workspace.root, root: workspace.root });
+    const workspace = await workspaces.getWorkspace(workspaceId);
+    if (input.path) await workspaces.resolvePath(workspace, input.path);
+    const response = await findFilesTool(input, { cwd: workspace.root });
     if (response.isError) {
       logFailedToolResponse(config, { tool: toolNames.glob, workspaceId, path: input.path }, response.content, startedAt);
       return response;
@@ -79,16 +79,16 @@ function registerSearchTools(context: ToolRegistrationContext): void {
     title: "Ls",
     description: "List a directory in a workspace.",
     inputSchema: {
-      workspaceId: z.string().describe(workspaceIdDescription),
+      workspace_id: z.string().describe(workspaceIdDescription),
       path: z.string().describe("Directory path relative to the workspace root."),
     },
     outputSchema: resultOutputSchema(),
     annotations: { readOnlyHint: true },
-  }, async ({ workspaceId, ...input }) => {
+  }, async ({ workspace_id: workspaceId, ...input }) => {
     const startedAt = performance.now();
-    const workspace = workspaces.getWorkspace(workspaceId);
-    workspaces.resolvePath(workspace, input.path);
-    const response = await listDirectoryTool(input, { cwd: workspace.root, root: workspace.root });
+    const workspace = await workspaces.getWorkspace(workspaceId);
+    await workspaces.resolvePath(workspace, input.path);
+    const response = await listDirectoryTool(input, { cwd: workspace.root });
     if (response.isError) {
       logFailedToolResponse(config, { tool: toolNames.ls, workspaceId, path: input.path }, response.content, startedAt);
       return response;

@@ -35,7 +35,7 @@ This branch:
   permission request, including SSH and production deployment commands
 - runs every configured Codex turn with `danger-full-access`, including turns
   submitted with a narrower write-mode hint
-- allows only the bounded `devspace agents ls|targets|run|continue|show`
+- allows only the bounded `devspace agents ls|targets|run|continue|show|wait`
   command surface
 - blocks common local agent launch commands through both `bash` and
   `exec_command`, including Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent,
@@ -59,6 +59,8 @@ Install this branch directly from the public fork:
 ```bash
 npm install -g github:Ciward/devspace#devspace-cheap
 ```
+
+The same `/mcp` endpoint serves the 2026-07-28 per-request protocol and automatically supports older 2025-era clients through stateless compatibility handling. There is no protocol mode to configure.
 
 ## Sponsors and Special Thanks
 <!-- 
@@ -121,7 +123,11 @@ npx @waishnav/devspace init
 During setup, DevSpace asks for:
 
 - where you will use it: ChatGPT, Coding Agents, or both
-- which Coding Agents DevSpace may use
+- which agents DevSpace may use as subagents
+
+The first choice is where you invoke DevSpace from. The subagent choice is
+separate: ChatGPT or another coding agent can delegate work through DevSpace to
+the agents you select there.
 
 If you select ChatGPT, setup also asks which local project folders it may open
 and for your public HTTPS base URL from Cloudflare Tunnel, ngrok, Pinggy,
@@ -291,9 +297,16 @@ Install pnpm 11.25.0, the version pinned in `package.json`, with
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm dev:seed
 pnpm dev
 pnpm typecheck
 pnpm test
 pnpm build
 pnpm start
 ```
+
+`dev:seed` forks your normal DevSpace config and SQLite state into an ignored
+checkout-local `.devspace-dev/` directory so source builds and migrations do not
+modify your normal installation. Use `pnpm dev:reset` to discard that QA state
+and fork it again. See [Development and Manual QA](docs/development.md) for
+worktree switching, ChatGPT, and database-migration workflows.

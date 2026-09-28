@@ -94,6 +94,8 @@ function assertCombinedMigration(sqlite: Database.Database): void {
   assert.equal(agentColumns.some((column) => column.name === "effort"), true);
   assert.equal(agentColumns.some((column) => column.name === "error_code"), true);
   assert.equal(agentColumns.some((column) => column.name === "error_retryable"), true);
+  assert.equal(columns.some((column) => column.name === "recovery_kind"), true);
+  assert.ok(sqlite.prepare("select name from sqlite_master where name = 'local_agent_turns'").get());
 }
 
 for (const options of [
@@ -111,7 +113,18 @@ for (const options of [
   try {
     migrateDatabase(sqlite);
     assertCombinedMigration(sqlite);
+    migrateDatabase(sqlite);
+    assertCombinedMigration(sqlite);
   } finally {
     sqlite.close();
   }
+}
+
+const unknownHistory = createLegacyDatabase();
+try {
+  unknownHistory.exec("insert into devspace_schema_migrations values (4, 'unknown-lineage', '2026-01-01')");
+  assert.throws(() => migrateDatabase(unknownHistory), /history is incompatible/);
+  assert.equal(unknownHistory.prepare("select name from devspace_schema_migrations where version = 4").pluck().get(), "unknown-lineage");
+} finally {
+  unknownHistory.close();
 }

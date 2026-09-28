@@ -42,7 +42,7 @@ const config: ServerConfig = {
   skillPaths: [],
   devspaceSkillsDir: "/Users/alice/.devspace/skills",
   devspaceAgentsDir: "/Users/alice/.devspace/agents",
-  subagents: { enabled: false, providers: [] },
+  subagents: { enabled: false, instructions: "on-demand", providers: [] },
   subagentMaxConcurrentTurns: 2,
   agentDir: "/Users/alice/.codex",
   logging: {
@@ -59,6 +59,7 @@ const config: ServerConfig = {
     accessTokenTtlSeconds: 3600,
     refreshTokenTtlSeconds: 2592000,
     scopes: ["devspace"],
+    allowedResourceUrls: [],
     allowedRedirectHosts: ["chatgpt.com", "localhost", "127.0.0.1"],
   },
 };
