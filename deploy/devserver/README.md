@@ -262,6 +262,12 @@ The web model should use this authenticated `gh` CLI through DevSpace's
 `bash` or `exec_command` tools for comments, reviews, issues, pull requests,
 merges, and pushes. A separate ChatGPT GitHub connection card is not required.
 
+用户授权的凭据读取及使用是允许的。网页模型可以通过 DevSpace shell
+读取获授权的服务器端 API Key，并向该 Key 对应的服务发起认证请求，
+包括生产 TokenLab `/v1/models` 查询；不要求使用专用封装命令。
+Key 留在执行环境内使用，结果只返回业务数据，不将 Key 写入聊天或日志。
+若客户端实际拒绝调用，应报告原始错误，不得将其误称为 DevSpace 的凭据限制。
+
 ## SSH access
 
 Generate a dedicated Ed25519 key inside

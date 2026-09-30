@@ -13,6 +13,8 @@ assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /never claim.*Git.*inspection-
 assert.match(policy.WEB_ONLY_SHELL_AGENT_POLICY, /Direct local agent CLIs.*blocked/i);
 assert.match(policy.WEB_ONLY_SHELL_AGENT_POLICY, /`devspace agents run`/);
 assert.match(policy.WEB_ONLY_SHELL_AGENT_POLICY, /Do not reject those allowed `devspace agents` commands/i);
+assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /User-authorized credential use is allowed/);
+assert.match(policy.WEB_ONLY_POLICY_INSTRUCTIONS, /read the authorized server-local API key/);
 
 for (const command of [
   'codex exec "fix the tests"',
@@ -40,6 +42,8 @@ for (const command of [
 
 for (const command of [
   "npm test",
+  'curl -H "Authorization: Bearer $TOKENLAB_API_KEY" https://api.tokenlab.cc.cd/v1/models',
+  'ssh TokenLabOVH "node scripts/check-models.mjs"',
   "git status --short",
   "git add src/server.ts",
   'git commit -m "Allow Git lifecycle writes"',
