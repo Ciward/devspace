@@ -258,6 +258,9 @@ The current GitHub CLI login is persisted in
 `/srv/devserver/runtime/home/.config/gh/hosts.yml` with mode `0600`. GitHub
 operations use HTTPS through `gh auth git-credential`. Revoke it with
 `gh auth logout --hostname github.com` inside the container when needed.
+The web model should use this authenticated `gh` CLI through DevSpace's
+`bash` or `exec_command` tools for comments, reviews, issues, pull requests,
+merges, and pushes. A separate ChatGPT GitHub connection card is not required.
 
 ## SSH access
 

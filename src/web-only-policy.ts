@@ -8,6 +8,7 @@ export const WEB_ONLY_POLICY_INSTRUCTIONS = [
   "Perform work with DevSpace workspace tools and delegate only through the configured `devspace agents` commands when a bounded subagent materially helps.",
   "Never launch or call a local agent directly, including Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent, Copilot CLI, or OMX agent orchestration.",
   "SSH, SCP, and rsync to configured remote hosts are explicitly allowed for inspection, testing, deployment, and production operations authorized by the user; do not claim that DevSpace or Codex blocks those commands.",
+  "GitHub operations are already authenticated inside this DevServer through the `gh` CLI. Do not ask the user to connect a separate ChatGPT GitHub card and do not wait for a ChatGPT GitHub connector; use `gh pr`, `gh issue`, and `gh api` through the allowed bash or exec_command tools for repository reads, comments, reviews, merges, and pushes.",
   "The SSH exception does not permit launching Codex CLI, Claude Code, OpenCode, Pi, Cursor Agent, Copilot CLI, or OMX orchestration on the remote host.",
   "DevSpace enforces the configured provider, model, and effort policy for every allowed subagent call.",
   "Git lifecycle writes are explicitly allowed inside the active workspace: use git add, commit, push, fetch, pull, merge, rebase, cherry-pick, branch, and tag when needed to complete the user's requested repository workflow; never claim that DevSpace restricts Git to inspection-only commands.",

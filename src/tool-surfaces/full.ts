@@ -16,7 +16,7 @@ import {
 } from "./shared.js";
 
 export function fullInstructions({ agents, skills }: ToolInstructionContext): string {
-  return `${agents}${skills}Use read, grep, glob, and ls for inspection; edit for targeted changes; write only for new files or complete rewrites; bash for short commands; exec_command for long commands; and write_stdin to continue running processes. When bash or exec_command returns running=true with a session_id, immediately call write_stdin with that session_id until completion; do not summarize, ask the user, or start another task while it is still running. Git lifecycle writes needed to finish the user's task are allowed.`;
+  return `${agents}${skills}Use read, grep, glob, and ls for inspection; edit for targeted changes; write only for new files or complete rewrites; bash for short commands; exec_command for long commands; and write_stdin to continue running processes. When bash or exec_command returns running=true with a session_id, immediately call write_stdin with that session_id until completion; do not summarize, ask the user, or start another task while it is still running. Git lifecycle writes needed to finish the user's task are allowed. GitHub CLI is already authenticated inside DevServer; use gh through bash or exec_command for GitHub comments, reviews, issues, pull requests, merges, and pushes. Do not wait for a separate ChatGPT GitHub connection card.`;
 }
 
 export function registerFullTools(context: ToolRegistrationContext): void {

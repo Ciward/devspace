@@ -99,6 +99,8 @@ assert.match(formatted, /Completed with ChatGPT Web \+ DevSpace/);
 assert.match(formatted, /Completed with Claude Web \+ DevSpace/);
 assert.match(formatted, /Git lifecycle writes are explicitly allowed/i);
 assert.match(formatted, /git add, commit, push/i);
+assert.match(formatted, /GitHub operations are already authenticated/i);
+assert.match(formatted, /Do not ask the user to connect a separate ChatGPT GitHub card/i);
 
 assert.equal(toolNamesFor(config).workspaceInfo, "workspace_info");
 assert.equal(toolNamesFor(config).listProjects, "list_projects");
