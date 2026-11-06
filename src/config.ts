@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { parsePublicOrigin } from "./public-origins.js";
 import type { ToolMode } from "./config-schema.js";
 import { expandHomePath } from "./roots.js";
 import type { LoggingConfig } from "./logger.js";
@@ -16,6 +17,7 @@ export interface ServerConfig {
   allowedRoots: string[];
   allowedHosts: string[];
   publicBaseUrl: string;
+  publicBaseUrlAliases?: string[];
   mcpSessionIdleTimeoutMs: number;
   mcpSessionCleanupIntervalMs: number;
   mcpSessionMaxCount: number;
@@ -50,12 +52,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       || stored.server.publicBaseUrl
       || localPublicBaseUrl(host, port),
   );
+  const publicBaseUrlAliases = Array.from(new Set((
+    parseStringList(env.DEVSPACE_PUBLIC_BASE_URL_ALIASES) ?? stored.server.publicBaseUrlAliases
+  ).map((value) => parsePublicOrigin(value, "publicBaseUrlAliases"))));
   const derivedAllowedHosts = [
     "localhost",
     "127.0.0.1",
     "::1",
     host,
     new URL(publicBaseUrl).hostname,
+    ...publicBaseUrlAliases.map((value) => new URL(value).hostname),
     ...stored.server.allowedHosts,
   ];
   const configuredAllowedHosts = parseStringList(env.DEVSPACE_ALLOWED_HOSTS);
@@ -101,6 +107,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     ),
     allowedHosts: normalizeAllowedHosts(configuredAllowedHosts ?? derivedAllowedHosts),
     publicBaseUrl,
+    publicBaseUrlAliases,
     mcpSessionIdleTimeoutMs: parseBoundedInteger(
       env.DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_MS,
       stored.server.mcpSessionIdleTimeoutMs,
@@ -271,11 +278,7 @@ function parseRequiredSecret(value: string | undefined): string {
 }
 
 function parsePublicBaseUrl(value: string): string {
-  const parsed = new URL(value);
-  parsed.hash = "";
-  parsed.search = "";
-  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
-  return parsed.toString().replace(/\/$/, "");
+  return parsePublicOrigin(value);
 }
 
 function localPublicBaseUrl(host: string, port: number): string {

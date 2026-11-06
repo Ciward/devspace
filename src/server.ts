@@ -6,7 +6,7 @@ import { access, readdir, realpath, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { mcpAuthRouter, mcpAuthMetadataRouter, createOAuthMetadata, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { resourceUrlFromServerUrl } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
 import { createMcpHandler } from "@modelcontextprotocol/server";
@@ -24,6 +24,7 @@ import {
   registerArtifactTools,
 } from "./artifact-tools.js";
 import { loadConfig, type ServerConfig } from "./config.js";
+import { publicOrigins } from "./public-origins.js";
 import {
   createOpenAIIncomingArtifactAdapter,
   type IncomingArtifactAdapter,
@@ -363,6 +364,34 @@ function sendJsonRpcError(
     error: { code, message },
     id: null,
   });
+}
+
+/**
+ * Some older MCP hosts sent workspace-scoped tool arguments in camelCase even
+ * though DevSpace's public schemas use snake_case. Normalize that compatibility
+ * shape at the HTTP boundary so the model-facing schemas remain stable.
+ */
+function normalizeWorkspaceIdAlias(body: unknown): string | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return;
+  const params = (body as Record<string, unknown>).params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return;
+  const args = (params as Record<string, unknown>).arguments;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return;
+
+  const argumentsRecord = args as Record<string, unknown>;
+  if (!("workspaceId" in argumentsRecord)) return;
+  if (
+    "workspace_id" in argumentsRecord
+    && argumentsRecord.workspace_id !== undefined
+    && argumentsRecord.workspace_id !== argumentsRecord.workspaceId
+  ) {
+    return "workspace_id and workspaceId must match when both are provided";
+  }
+
+  if (!("workspace_id" in argumentsRecord) || argumentsRecord.workspace_id === undefined) {
+    argumentsRecord.workspace_id = argumentsRecord.workspaceId;
+  }
+  delete argumentsRecord.workspaceId;
 }
 
 function requestLogFields(req: Request, config: ServerConfig): Record<string, unknown> {
@@ -1032,14 +1061,41 @@ export function createServer(
     host: config.host,
     ...(allowedHosts ? { allowedHosts } : {}),
   });
+  const origins = publicOrigins(config.publicBaseUrl, config.publicBaseUrlAliases);
   const mcpUrl = new URL("/mcp", config.publicBaseUrl);
   const resourceServerUrl = resourceUrlFromServerUrl(mcpUrl);
-  const oauthProvider = new SingleUserOAuthProvider(config.oauth, mcpUrl, config.stateDir);
-  const bearerAuth = requireBearerAuth({
-    verifier: oauthProvider,
-    requiredScopes: [config.oauth.scopes[0] ?? "devspace"],
-    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
+  // One provider owns all client registrations, token records and in-flight codes.
+  const oauthProvider = new SingleUserOAuthProvider({
+    ...config.oauth,
+    allowedResourceUrls: Array.from(new Set([
+      ...config.oauth.allowedResourceUrls,
+      ...origins.map((origin) => new URL("/mcp", origin).href),
+    ])),
+  }, mcpUrl, config.stateDir);
+  const originHandlers = origins.map((origin) => {
+    const issuerUrl = new URL(origin);
+    const resource = resourceUrlFromServerUrl(new URL("/mcp", origin));
+    return {
+      host: issuerUrl.host.toLowerCase(),
+      metadata: mcpAuthMetadataRouter({
+        oauthMetadata: createOAuthMetadata({
+          provider: oauthProvider, issuerUrl, baseUrl: issuerUrl,
+          scopesSupported: config.oauth.scopes,
+        }),
+        resourceServerUrl: resource,
+        scopesSupported: config.oauth.scopes,
+        resourceName: "DevSpace",
+      }),
+      bearerAuth: requireBearerAuth({
+        verifier: oauthProvider,
+        requiredScopes: [config.oauth.scopes[0] ?? "devspace"],
+        resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resource),
+      }),
+    };
   });
+  const originHandlersByHost = new Map(originHandlers.map((entry) => [entry.host, entry]));
+  const handlersForRequest = (req: Request) =>
+    originHandlersByHost.get(req.headers.host?.toLowerCase() ?? "") ?? originHandlers[0]!;
   const workspaceStore = createWorkspaceStore(config.stateDir);
   const workspaces = new WorkspaceRegistry(config, workspaceStore);
   const reviewCheckpoints = createReviewCheckpointManager();
@@ -1191,6 +1247,7 @@ export function createServer(
     next();
   });
 
+  app.use((req, res, next) => handlersForRequest(req).metadata(req, res, next));
   app.use(
     mcpAuthRouter({
       provider: oauthProvider,
@@ -1225,7 +1282,7 @@ export function createServer(
     const requestId = res.locals.requestId as string | undefined;
 
     await new Promise<void>((resolve, reject) => {
-      bearerAuth(req, res, (error?: unknown) => {
+      handlersForRequest(req).bearerAuth(req, res, (error?: unknown) => {
         if (error) reject(error);
         else resolve();
       });
@@ -1241,6 +1298,12 @@ export function createServer(
         ...requestLogFields(req, config),
       });
       sendJsonRpcError(res, 401, -32001, "Unauthorized");
+      return;
+    }
+
+    const workspaceIdAliasError = normalizeWorkspaceIdAlias(req.body);
+    if (workspaceIdAliasError) {
+      sendJsonRpcError(res, 400, -32602, workspaceIdAliasError);
       return;
     }
 

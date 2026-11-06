@@ -1,5 +1,6 @@
 import * as z from "zod/v4";
 import { subagentsConfigSchema } from "./local-agent-config.js";
+import { parsePublicOrigin } from "./public-origins.js";
 
 export const DEVSPACE_CONFIG_VERSION = 1 as const;
 export const DEVSPACE_CONFIG_SCHEMA_URL =
@@ -8,7 +9,13 @@ export const DEVSPACE_CONFIG_SCHEMA_URL =
 const serverConfigSchema = z.object({
   host: z.string().trim().min(1).default("127.0.0.1"),
   port: z.number().int().min(1).max(65_535).default(7676),
-  publicBaseUrl: z.string().url().nullable().default(null),
+  publicBaseUrl: z.string().url().refine((value) => {
+    try { parsePublicOrigin(value); return true; } catch { return false; }
+  }, "Use an HTTPS origin without paths, credentials, query or fragment (HTTP on localhost or 127.0.0.1 is allowed)").nullable().default(null),
+  publicBaseUrlAliases: z.array(z.string().trim().refine((value) => {
+    try { parsePublicOrigin(value); return true; } catch { return false; }
+  }, "Use an HTTPS origin without paths, credentials, query or fragment (HTTP on localhost or 127.0.0.1 is allowed)"))
+    .default([]),
   allowedHosts: z.array(z.string().trim().min(1)).default([]),
   trustProxy: z.boolean().default(false),
   mcpSessionIdleTimeoutMs: z.number().int().min(30_000).max(24 * 60 * 60 * 1_000).default(24 * 60 * 60 * 1_000),

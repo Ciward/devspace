@@ -65,7 +65,7 @@ const strictConfig: SubagentsConfig = {
   providers: [{
     id: "codex",
     enabled: true,
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     effort: "max",
     allowOverrides: false,
   }],
@@ -76,5 +76,5 @@ const strictStatuses = buildLocalAgentProviderStatuses(strictConfig, [
 const strictCatalog = buildLocalAgentCatalog(strictConfig, profiles, strictStatuses);
 assert.deepEqual(strictCatalog.providers.map((provider) => provider.id), ["codex"]);
 assert.deepEqual(strictCatalog.profiles.map((profile) => profile.name), ["reviewer"]);
-assert.equal(strictCatalog.profiles[0]?.model, "gpt-5.6-luna");
+assert.equal(strictCatalog.profiles[0]?.model, "gpt-6-luna");
 assert.equal(strictCatalog.profiles[0]?.effort, "max");

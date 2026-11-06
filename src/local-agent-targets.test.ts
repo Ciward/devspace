@@ -143,19 +143,19 @@ assert.deepEqual(parseLocalAgentRunArgs(["codex", "--", "--json", "literal"]), {
   const strictDefaults = [{
     id: "codex",
     enabled: true,
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     effort: "max",
     allowOverrides: false,
   }] as const;
   const raw = resolveLocalAgentTarget("codex", profiles, undefined, undefined, strictDefaults);
-  assert.equal(raw?.model, "gpt-5.6-luna");
+  assert.equal(raw?.model, "gpt-6-luna");
   assert.equal(raw?.effort, "max");
   assert.equal(raw?.policyViolation, undefined);
 
   const matching = resolveLocalAgentTarget(
     "codex",
     profiles,
-    "gpt-5.6-luna",
+    "gpt-6-luna",
     "max",
     strictDefaults,
   );
@@ -170,7 +170,7 @@ assert.deepEqual(parseLocalAgentRunArgs(["codex", "--", "--json", "literal"]), {
   );
   assert.deepEqual(modelMismatch?.policyViolation, {
     field: "model",
-    configured: "gpt-5.6-luna",
+    configured: "gpt-6-luna",
     requested: "gpt-5.6-sol",
   });
 
@@ -183,7 +183,7 @@ assert.deepEqual(parseLocalAgentRunArgs(["codex", "--", "--json", "literal"]), {
   );
   assert.deepEqual(profileMismatch?.policyViolation, {
     field: "model",
-    configured: "gpt-5.6-luna",
+    configured: "gpt-6-luna",
     requested: "gpt-5-codex",
   });
 }

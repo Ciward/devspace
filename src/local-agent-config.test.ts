@@ -142,7 +142,7 @@ const strict = subagentsConfigSchema.parse({
   providers: [{
     id: "codex",
     enabled: true,
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     effort: "max",
     allowOverrides: false,
   }],
@@ -163,7 +163,7 @@ assert.notEqual(
 assert.deepEqual(strict.providers[0], {
   id: "codex",
   enabled: true,
-  model: "gpt-5.6-luna",
+  model: "gpt-6-luna",
   effort: "max",
   allowOverrides: false,
 });
@@ -177,7 +177,7 @@ assert.throws(
 assert.throws(
   () => subagentsConfigSchema.parse({
     enabled: true,
-    providers: [{ id: "codex", enabled: true, model: "gpt-5.6-luna", allowOverrides: false }],
+    providers: [{ id: "codex", enabled: true, model: "gpt-6-luna", allowOverrides: false }],
   }),
   /effort.*required/i,
 );

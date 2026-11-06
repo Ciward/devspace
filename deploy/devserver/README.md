@@ -57,7 +57,9 @@ to the server's `/home/ubuntu/work` directory at the same absolute path.
 /run/docker-devserver.sock          dedicated Docker control socket
 ```
 
-The public connector URL is `https://devserver.ciward.dpdns.org/mcp`. A dedicated
+The public connector URL is `https://devserver.ciward.com/mcp`. The legacy
+`https://devserver.ciward.dpdns.org/mcp` remains an explicit OAuth origin alias;
+existing grants retain their original resource URL. A dedicated
 Cloudflare Tunnel connects directly to the `devserver` container on the private
 Compose network. Docker does not publish an application port; a systemd socket
 proxy listens on `127.0.0.1:17676` and forwards health and diagnostic probes to

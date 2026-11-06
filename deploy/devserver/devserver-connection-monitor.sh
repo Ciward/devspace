@@ -8,7 +8,7 @@ readonly STATE_ROOT="${DEVSERVER_CONNECTION_MONITOR_STATE_ROOT:-$STORAGE_ROOT/ru
 readonly LOG_FILE="$STATE_ROOT/connection-monitor.ndjson"
 readonly CONTINUATION_FILE="${DEVSERVER_CONTINUATION_FILE:-$STORAGE_ROOT/runtime/home/.local/share/devspace/pending-continuations.json}"
 readonly LOCK_FILE="${DEVSERVER_CONNECTION_MONITOR_LOCK_FILE:-/run/lock/devserver-connection-monitor.lock}"
-readonly PUBLIC_HEALTH_URL="${DEVSERVER_PUBLIC_HEALTH_URL:-https://devserver.ciward.dpdns.org/healthz}"
+readonly PUBLIC_HEALTH_URL="${DEVSERVER_PUBLIC_HEALTH_URL:-https://devserver.ciward.com/healthz}"
 readonly WINDOW="${DEVSERVER_CONNECTION_MONITOR_WINDOW:-90s}"
 readonly MAX_LOG_BYTES=$((50 * 1024 * 1024))
 

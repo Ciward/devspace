@@ -134,6 +134,7 @@ assert.ok(compose.includes("/srv/devserver/runtime/cloudflared:/etc/cloudflared:
 assert.match(compose, /external:\s*true/);
 assert.match(compose, /ipv4_address:\s*172\.30\.250\.10/);
 assert.match(compose, /ipv4_address:\s*172\.30\.250\.11/);
+assert.doesNotMatch(compose, /boji-edge/);
 assert.doesNotMatch(compose, /ports:/);
 assert.match(compose, /max-size:\s*"64m"/);
 assert.match(compose, /max-file:\s*"2"/);

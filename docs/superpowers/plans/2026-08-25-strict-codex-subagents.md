@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Update `devspace-cheap` to current upstream and enable only Codex `gpt-5.6-luna` with `max` effort under a non-overridable policy on Mac and DevServer.
+**Goal:** Update `devspace-cheap` to current upstream and enable only Codex `gpt-6-luna` with `max` effort under a non-overridable policy on Mac and DevServer.
 
 **Architecture:** Adopt upstream's daemon-owned Subagent runtime and structured provider configuration, then add one backward-compatible `allowOverrides` policy field enforced during target/profile resolution. Preserve the Web-only boundary by allowing only `devspace agents` as the delegated path. DevServer installs and updates host Codex directly in its persistent home and uses the protected TokenLab `devserver` key.
 

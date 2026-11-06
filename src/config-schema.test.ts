@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { parsePublicOrigin } from "./public-origins.js";
 import { readFileSync } from "node:fs";
 import {
   devspaceConfigJsonSchema,
@@ -30,6 +31,17 @@ for (const url of [
     configVersion: 1, oauth: { allowedResourceUrls: [url] },
   }).success, false, url);
 }
+
+for (const origin of ["https://old.example.com", "http://localhost:7676", "http://127.0.0.1:7676", "https://[::1]:7676"]) {
+  assert.equal(devspaceConfigSchema.safeParse({ configVersion: 1, server: { publicBaseUrlAliases: [origin] } }).success, true, origin);
+}
+for (const origin of ["https://old.example.com/path", "https://old.example.com/..", "https://old.example.com?", "https://old.example.com#",
+  "https://user:password@old.example.com", "https://@old.example.com", "https://*.example.com", "http://remote.example.com", "http://[::1]:7676", "ftp://localhost"]) {
+  assert.equal(devspaceConfigSchema.safeParse({ configVersion: 1, server: { publicBaseUrlAliases: [origin] } }).success, false, origin);
+  assert.equal(devspaceConfigSchema.safeParse({ configVersion: 1, server: { publicBaseUrl: origin } }).success, false, origin);
+}
+
+assert.throws(() => parsePublicOrigin("http://[::1]:7676"), /OAuth SDK requires HTTPS for IPv6 issuers/);
 
 const generatedSchema = `${JSON.stringify(devspaceConfigJsonSchema(), null, 2)}\n`;
 const committedSchema = readFileSync(

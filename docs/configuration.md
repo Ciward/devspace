@@ -27,6 +27,7 @@ Run `devspace init` to create both files. `devspace config set publicBaseUrl
     "port": 7676,
     // Use the public origin only; do not append /mcp.
     "publicBaseUrl": "https://devspace.example.com",
+    "publicBaseUrlAliases": [],
     "allowedHosts": [],
     "trustProxy": false,
     "mcpSessionIdleTimeoutMs": 86400000,
@@ -97,6 +98,44 @@ Resource URLs must use HTTPS; HTTP is allowed only for `localhost`, `127.0.0.1`,
 or `[::1]`, with optional ports. Restart DevSpace after changing
 `oauth.allowedResourceUrls`: the provider reads this policy at server creation.
 After restarting, refresh tokens for removed aliases can no longer mint tokens.
+
+## Public domain migration
+
+`server.publicBaseUrlAliases` lists explicitly trusted alternate public origins.
+For example, change `server.publicBaseUrl` to `https://devserver.ciward.com` and
+retain `https://devserver.ciward.dpdns.org` in `server.publicBaseUrlAliases`.
+Only HTTPS origins are accepted, with HTTP on `localhost` or `127.0.0.1`
+allowed for development. The installed OAuth SDK requires HTTPS for IPv6
+issuers, including `[::1]`;
+paths, credentials, query strings, fragments and wildcard hosts are rejected.
+Aliases are never inferred from `Host`, forwarded headers or
+`oauth.allowedResourceUrls`.
+
+Each configured hostname returns its own OAuth discovery and bearer challenge
+URLs. All hostnames share one provider, client store, token store and in-flight
+authorization-code map. Existing grants retain their original resource URL;
+clients must keep using that resource when refreshing an old token. Directly
+changing a client's connection URL does not retarget its existing refresh grant:
+keep its original resource, or obtain a separate authorization for the new
+resource. The prior token remains bound to its original resource. A new
+client can authorize the new `/mcp` resource. Retiring an alias resource requires
+removing its origin from `server.publicBaseUrlAliases` and its resource URL from
+`oauth.allowedResourceUrls` if it was also explicitly listed there. These policy
+changes do not delete persisted records. Widget assets and their
+CSP use the canonical public URL.
+
+Aliases are included in the derived allowed-host list. `DEVSPACE_ALLOWED_HOSTS`
+continues to replace that list: when setting it, explicitly include both old
+and new hostnames. The optional comma-separated
+`DEVSPACE_PUBLIC_BASE_URL_ALIASES` environment value overrides the stored list.
+A configured hostname must reach the application with its original `Host`;
+remove temporary origin Host overrides after enabling this policy.
+
+Keep the existing state directory and owner credential. Configuration is read
+at startup; drain running process sessions before a controlled restart.
+Authorization codes in memory do not survive restart, even though access and
+refresh tokens are persisted. Changing a public domain does not clear those
+tokens or rewrite their resource bindings.
 
 ## Tool modes and UI
 
@@ -236,6 +275,7 @@ values to these JSONC keys:
 | --- | --- |
 | `HOST`, `PORT` | `server.host`, `server.port` |
 | `DEVSPACE_PUBLIC_BASE_URL` | `server.publicBaseUrl` |
+| `DEVSPACE_PUBLIC_BASE_URL_ALIASES` | `server.publicBaseUrlAliases` |
 | `DEVSPACE_ALLOWED_HOSTS` | `server.allowedHosts` |
 | `DEVSPACE_TRUST_PROXY` | `server.trustProxy` |
 | `DEVSPACE_ALLOWED_ROOTS` | `workspaces.allowedRoots` |

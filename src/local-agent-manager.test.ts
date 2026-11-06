@@ -216,7 +216,7 @@ const strictManager = new LocalAgentManager({
     providers: [{
       id: "codex",
       enabled: true,
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       effort: "max",
       allowOverrides: false,
     }],
@@ -253,7 +253,7 @@ const strictRun = unwrap(await strictManager.start({
   workspaceId: scope.workspaceId,
   workspaceRoot: root,
 }));
-assert.equal(strictRun.model, "gpt-5.6-luna");
+assert.equal(strictRun.model, "gpt-6-luna");
 assert.equal(strictRun.effort, "max");
 await waitFor(() => strictStore.get(strictRun.id)?.status === "idle");
 

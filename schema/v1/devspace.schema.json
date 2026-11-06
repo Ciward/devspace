@@ -41,6 +41,13 @@
             }
           ]
         },
+        "publicBaseUrlAliases": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "allowedHosts": {
           "default": [],
           "type": "array",

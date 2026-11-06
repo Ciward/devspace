@@ -478,7 +478,9 @@ test("HTTP endpoint serves modern MCP and stateless legacy clients", async (t) =
   const { root, localBaseUrl, accessToken } = await httpServerFixture(
     t,
     "devspace-modern-http-test-",
+    "full",
   );
+  await writeFile(join(root, "README.md"), "mapped workspace\n");
 
   const unauthenticated = await postModernMcp(
     localBaseUrl,
@@ -545,6 +547,38 @@ test("HTTP endpoint serves modern MCP and stateless legacy clients", async (t) =
   };
   assert.equal(repeatedBody.result?.structuredContent?.workspace_id, workspaceId);
   assert.equal(repeatedBody.result?.structuredContent?.agents_files, undefined);
+
+  const mappedRead = await postModernMcp(
+    localBaseUrl,
+    accessToken,
+    "tools/call",
+    {
+      name: "read",
+      arguments: { workspaceId, path: "README.md", limit: 1 },
+    },
+  );
+  assert.equal(mappedRead.status, 200, await mappedRead.clone().text());
+  const mappedReadBody = await mappedRead.json() as {
+    result?: { structuredContent?: { result?: string }; isError?: boolean };
+  };
+  assert.equal(mappedReadBody.result?.isError, undefined);
+  assert.match(mappedReadBody.result?.structuredContent?.result ?? "", /mapped workspace/);
+
+  const mappedBash = await postModernMcp(
+    localBaseUrl,
+    accessToken,
+    "tools/call",
+    {
+      name: "bash",
+      arguments: { workspaceId, command: "printf mapped-bash" },
+    },
+  );
+  assert.equal(mappedBash.status, 200, await mappedBash.clone().text());
+  const mappedBashBody = await mappedBash.json() as {
+    result?: { structuredContent?: { result?: string }; isError?: boolean };
+  };
+  assert.equal(mappedBashBody.result?.isError, undefined);
+  assert.match(mappedBashBody.result?.structuredContent?.result ?? "", /mapped-bash/);
 
   const legacy = await fetch(`${localBaseUrl}/mcp`, {
     method: "POST",
@@ -681,6 +715,7 @@ interface HttpServerFixture {
 async function httpServerFixture(
   t: TestContext,
   prefix: string,
+  toolMode: ToolMode = "codex",
 ): Promise<HttpServerFixture> {
   const root = await mkdtemp(join(tmpdir(), prefix));
   const ownerToken = "test-owner-token-that-is-long-enough";
@@ -694,6 +729,7 @@ async function httpServerFixture(
       worktreeRoot: join(root, ".worktrees"),
     },
     storage: { stateDir: join(root, ".state") },
+    tools: { mode: toolMode },
   }));
   const running = createServer(config, { incomingArtifactAdapters: [] });
   const httpServer = running.app.listen(0, "127.0.0.1");

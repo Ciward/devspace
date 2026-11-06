@@ -27,8 +27,9 @@ services:
       DEVSPACE_WORKTREE_ROOT: /home/ubuntu/work/.devspace-worktrees
       DEVSPACE_WORKTREE_MAX_COUNT: "10"
       DEVSPACE_WORKTREE_ARCHIVE_REMOTE: origin
-      DEVSPACE_PUBLIC_BASE_URL: ${DEVSERVER_PUBLIC_BASE_URL:-https://devserver.ciward.dpdns.org}
-      DEVSPACE_ALLOWED_HOSTS: localhost,127.0.0.1,::1,devserver,devserver.ciward.dpdns.org
+      DEVSPACE_PUBLIC_BASE_URL: ${DEVSERVER_PUBLIC_BASE_URL:-https://devserver.ciward.com}
+      DEVSPACE_PUBLIC_BASE_URL_ALIASES: ${DEVSERVER_PUBLIC_BASE_URL_ALIASES:-https://devserver.ciward.dpdns.org}
+      DEVSPACE_ALLOWED_HOSTS: localhost,127.0.0.1,::1,devserver,devserver.ciward.com,devserver.ciward.dpdns.org
       DEVSPACE_TOOL_MODE: full
       DEVSPACE_RESUMABLE_BASH: "1"
       DEVSPACE_RESUMABLE_BASH_YIELD_MS: "5000"

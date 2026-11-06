@@ -9,7 +9,7 @@ Update `devspace-cheap` to the current upstream DevSpace implementation and
 re-enable subagents under one strict policy:
 
 - provider: `codex`
-- model: `gpt-5.6-luna`
+- model: `gpt-6-luna`
 - effort: `max`
 - runtime overrides: forbidden
 
@@ -44,7 +44,7 @@ Both deployments use:
       {
         "id": "codex",
         "enabled": true,
-        "model": "gpt-5.6-luna",
+        "model": "gpt-6-luna",
         "effort": "max",
         "allowOverrides": false
       }
@@ -92,8 +92,8 @@ The Mac service uses the existing host-installed Codex CLI and Codex
 authentication/configuration. Current local evidence confirms:
 
 - Codex CLI supports `app-server`;
-- the model catalog contains `gpt-5.6-luna`;
-- `gpt-5.6-luna` supports `max` effort.
+- the model catalog contains `gpt-6-luna`;
+- `gpt-6-luna` supports `max` effort.
 
 The Mac `~/.devspace/config.json` receives the strict Subagents configuration.
 The global npm-linked DevSpace checkout is rebuilt and its LaunchAgent is
@@ -144,7 +144,7 @@ with mode `0600`. It configures:
 - provider endpoint: `https://api.tokenlab.cc.cd`;
 - Responses wire protocol;
 - TokenLab bearer credential;
-- default model `gpt-5.6-luna`;
+- default model `gpt-6-luna`;
 - default reasoning effort `max`.
 
 The user explicitly accepts that ordinary DevServer shell access can read this
@@ -205,7 +205,7 @@ Mac runtime verification:
 
 - `devspace doctor` reports only Codex enabled and available;
 - `devspace agents targets --json` reports Luna/max;
-- one bounded real Subagent call records `gpt-5.6-luna` and `max`;
+- one bounded real Subagent call records `gpt-6-luna` and `max`;
 - local and public health/OAuth/MCP probes remain correct.
 
 DevServer runtime verification:

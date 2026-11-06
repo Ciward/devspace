@@ -16,6 +16,7 @@ try {
   assert.equal(defaults.host, "127.0.0.1");
   assert.equal(defaults.port, 7676);
   assert.equal(defaults.publicBaseUrl, "http://127.0.0.1:7676");
+  assert.deepEqual(defaults.publicBaseUrlAliases, []);
   assert.deepEqual(defaults.allowedRoots, [process.cwd()]);
   assert.deepEqual(defaults.allowedHosts, ["localhost", "127.0.0.1", "::1"]);
   assert.equal(defaults.toolMode, "codex");
@@ -120,6 +121,20 @@ try {
     shellCommands: true,
     trustProxy: true,
   });
+
+  const aliased = loadConfig({
+    ...env,
+    DEVSPACE_PUBLIC_BASE_URL: "https://new.example.com",
+    DEVSPACE_PUBLIC_BASE_URL_ALIASES: "https://old.example.com/,https://old.example.com",
+  });
+  assert.deepEqual(aliased.publicBaseUrlAliases, ["https://old.example.com"]);
+  assert.ok(aliased.allowedHosts.includes("old.example.com"));
+  const explicitHostPolicy = loadConfig({
+    ...env,
+    DEVSPACE_PUBLIC_BASE_URL_ALIASES: "https://old.example.com",
+    DEVSPACE_ALLOWED_HOSTS: "localhost,devspace.example.com",
+  });
+  assert.deepEqual(explicitHostPolicy.allowedHosts, ["localhost", "devspace.example.com"]);
 
   assert.equal(loadConfig(env).oauth.ownerToken, env.DEVSPACE_OAUTH_OWNER_TOKEN);
   const limited = loadConfig({
