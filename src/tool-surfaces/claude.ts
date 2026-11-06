@@ -21,7 +21,6 @@ import {
   resultOutputSchema,
   textBlock,
 } from "./shared.js";
-import type { ProcessSnapshot } from "../process-sessions.js";
 import { findWebOnlyCommandViolation, WEB_ONLY_SHELL_AGENT_POLICY } from "../web-only-policy.js";
 
 const CLAUDE_INSTRUCTIONS = `Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.`;
@@ -38,7 +37,7 @@ export function registerClaudeTools(context: ToolRegistrationContext): void {
   registerShellTool(context);
 }
 
-const CLAUDE_SHELL_DESCRIPTION = `Run a shell command with the local user's authority. Commands are not sandboxed; workspace validation only selects the initial working directory. Use this for file inspection, tests, builds, package scripts, and other commands. ${WEB_ONLY_SHELL_AGENT_POLICY}`;
+const CLAUDE_SHELL_DESCRIPTION = `Run a shell command with the local user's authority. Workspace validation only selects the initial directory. ${WEB_ONLY_SHELL_AGENT_POLICY}`;
 
 function registerClaudeMutationTools(context: ToolRegistrationContext): void {
   const { server, config, workspaces } = context;
@@ -76,6 +75,7 @@ function registerClaudeMutationTools(context: ToolRegistrationContext): void {
           response.content,
           startedAt,
         );
+
         return response;
       }
 
@@ -130,6 +130,7 @@ function registerClaudeMutationTools(context: ToolRegistrationContext): void {
       const workspaceId = workspace_id;
       const workspace = await workspaces.getWorkspace(workspaceId);
       const path = await workspaces.resolvePath(workspace, input.path);
+
       const response = await editFileTool({
         ...input,
         path,
@@ -150,12 +151,14 @@ function registerClaudeMutationTools(context: ToolRegistrationContext): void {
           response.content,
           startedAt,
         );
+
         return response;
       }
 
       const stats = countDiffStats(
         response.details?.patch ?? response.details?.diff,
       );
+
       const editResultText = `Edited ${input.path} (+${stats.additions} -${stats.removals}).`;
       const editContent = [textBlock(editResultText)];
       logToolCall(config, {
@@ -178,7 +181,7 @@ function registerClaudeMutationTools(context: ToolRegistrationContext): void {
 }
 
 function registerShellTool(context: ToolRegistrationContext): void {
-  const { server, config, workspaces, processSessions } = context;
+  const { server, config, workspaces } = context;
 
   server.registerTool(
     toolNames.shell,
@@ -203,7 +206,7 @@ function registerShellTool(context: ToolRegistrationContext): void {
           .optional()
           .describe("Timeout in seconds. Defaults to 30, max 300."),
       },
-      outputSchema: config.resumableBash ? processOutputSchema() : resultOutputSchema(),
+      outputSchema: resultOutputSchema(),
       annotations: SHELL_TOOL_ANNOTATIONS,
     },
     async ({ workspace_id, working_directory, ...input }) => {
@@ -211,42 +214,22 @@ function registerShellTool(context: ToolRegistrationContext): void {
       const workspaceId = workspace_id;
       const workingDirectory = working_directory;
       const violation = findWebOnlyCommandViolation(input.command);
+
       if (violation) {
         const content = [textBlock(violation)];
-        logFailedToolResponse(config, {
-          tool: toolNames.shell,
-          workspaceId,
-          workingDirectory: workingDirectory ?? ".",
-          command: input.command,
-          commandLength: input.command.length,
-        }, content, startedAt);
+        logFailedToolResponse(config, { tool: toolNames.shell, workspaceId,
+          workingDirectory: workingDirectory ?? ".", command: input.command,
+          commandLength: input.command.length }, content, startedAt);
         return { isError: true, content, structuredContent: { result: violation } };
       }
+
       const workspace = await workspaces.getWorkspace(workspaceId);
+
       const cwd = await workspaces.resolveWorkingDirectory(
         workspace,
         workingDirectory,
       );
-      if (config.resumableBash) {
-        const snapshot = await processSessions.start({
-          workspaceId,
-          command: input.command,
-          cwd,
-          workspaceRoot: workspace.root,
-          yieldTimeMs: config.resumableBashYieldMs,
-          timeoutMs: (input.timeout ?? 30) * 1_000,
-        });
-        logToolCall(config, {
-          tool: toolNames.shell,
-          workspaceId,
-          workingDirectory: workingDirectory ?? ".",
-          command: input.command,
-          commandLength: input.command.length,
-          success: true,
-          durationMs: Math.round(performance.now() - startedAt),
-        });
-        return processToolResponse(snapshot);
-      }
+
       const response = await runShellTool(input, {
         cwd,
       });
@@ -264,6 +247,7 @@ function registerShellTool(context: ToolRegistrationContext): void {
           response.content,
           startedAt,
         );
+
         return response;
       }
 
@@ -285,45 +269,4 @@ function registerShellTool(context: ToolRegistrationContext): void {
       };
     },
   );
-}
-
-function processOutputSchema(): z.ZodRawShape {
-  return resultOutputSchema({
-    session_id: z.number().optional(),
-    running: z.boolean(),
-    exit_code: z.number().int().optional(),
-    signal: z.string().optional(),
-    timed_out: z.boolean().optional(),
-    wall_time_ms: z.number().nonnegative(),
-    output_truncated: z.boolean(),
-    next_action: z.literal("write_stdin").optional(),
-  });
-}
-
-function processToolResponse(snapshot: ProcessSnapshot) {
-  const status = snapshot.running
-    ? `Process running with session ID ${snapshot.sessionId}. MUST call write_stdin immediately with this workspace_id and session_id; do not summarize or ask the user while it is running.`
-    : snapshot.timedOut
-      ? "Process timed out."
-      : snapshot.signal
-        ? `Process exited after signal ${snapshot.signal}.`
-        : `Process exited with code ${snapshot.exitCode ?? "unknown"}.`;
-  const result = snapshot.output
-    ? `${snapshot.output.replace(/\n$/, "")}\n${status}`
-    : status;
-  const content = [textBlock(result)];
-  return {
-    content,
-    structuredContent: {
-      result,
-      session_id: snapshot.sessionId,
-      running: snapshot.running,
-      exit_code: snapshot.exitCode,
-      signal: snapshot.signal,
-      timed_out: snapshot.timedOut,
-      wall_time_ms: snapshot.wallTimeMs,
-      output_truncated: snapshot.outputTruncated,
-      next_action: snapshot.running ? "write_stdin" : undefined,
-    },
-  };
 }

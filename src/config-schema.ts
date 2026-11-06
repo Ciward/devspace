@@ -3,25 +3,19 @@ import { subagentsConfigSchema } from "./local-agent-config.js";
 import { parsePublicOrigin } from "./public-origins.js";
 
 export const DEVSPACE_CONFIG_VERSION = 1 as const;
+
 export const DEVSPACE_CONFIG_SCHEMA_URL =
   "https://raw.githubusercontent.com/Waishnav/devspace/main/schema/v1/devspace.schema.json";
 
 const serverConfigSchema = z.object({
   host: z.string().trim().min(1).default("127.0.0.1"),
   port: z.number().int().min(1).max(65_535).default(7676),
-  publicBaseUrl: z.string().url().refine((value) => {
+  publicBaseUrl: z.string().url().nullable().default(null),
+  publicBaseUrlAliases: z.array(z.string().refine((value) => {
     try { parsePublicOrigin(value); return true; } catch { return false; }
-  }, "Use an HTTPS origin without paths, credentials, query or fragment (HTTP on localhost or 127.0.0.1 is allowed)").nullable().default(null),
-  publicBaseUrlAliases: z.array(z.string().trim().refine((value) => {
-    try { parsePublicOrigin(value); return true; } catch { return false; }
-  }, "Use an HTTPS origin without paths, credentials, query or fragment (HTTP on localhost or 127.0.0.1 is allowed)"))
-    .default([]),
+  })).default([]),
   allowedHosts: z.array(z.string().trim().min(1)).default([]),
-  trustProxy: z.boolean().default(false),
-  mcpSessionIdleTimeoutMs: z.number().int().min(30_000).max(24 * 60 * 60 * 1_000).default(24 * 60 * 60 * 1_000),
-  mcpSessionCleanupIntervalMs: z.number().int().min(1_000).max(60 * 60 * 1_000).default(5 * 60 * 1_000),
-  mcpSessionMaxCount: z.number().int().min(1).max(10_000).default(1_024),
-  mcpJsonResponses: z.boolean().default(false),
+  trustProxy: z.union([z.boolean(), z.literal("loopback")]).default(false),
 }).strict().prefault({});
 
 const workspacesConfigSchema = z.object({
@@ -36,9 +30,10 @@ const storageConfigSchema = z.object({
 }).strict().prefault({});
 
 const toolsConfigSchema = z.object({
-  mode: z.enum(["claude", "codex", "full"]).default("codex"),
-  resumableBash: z.boolean().default(false),
-  resumableBashYieldMs: z.number().int().min(0).max(30_000).default(10_000),
+  mode: z.enum(["claude", "codex", "full"]).optional().meta({
+    description:
+      "Optional override. When unset, DevSpace picks the tool surface from the connecting MCP host.",
+  }),
 }).strict().prefault({});
 
 const uiConfigSchema = z.object({
@@ -48,6 +43,13 @@ const uiConfigSchema = z.object({
 const artifactsConfigSchema = z.object({
   enabled: z.boolean().default(false),
   maxFileBytes: z.number().int().positive().default(100 * 1024 * 1024),
+}).strict().prefault({});
+
+const activityConfigSchema = z.object({
+  enabled: z.boolean().default(true)
+    .describe("Record workspace tool calls, with their arguments and results, in the local state database."),
+  maxTurns: z.number().int().positive().default(200)
+    .describe("Closed turns kept per workspace. Older turns and their tool calls are deleted."),
 }).strict().prefault({});
 
 const skillsConfigSchema = z.object({
@@ -68,9 +70,12 @@ const loggingConfigSchema = z.object({
 const oauthConfigSchema = z.object({
   accessTokenTtlSeconds: z.number().int().positive().default(60 * 60),
   refreshTokenTtlSeconds: z.number().int().positive().default(30 * 24 * 60 * 60),
+  refreshTokenGraceSeconds: z.number().int().min(0).max(600).default(0)
+    .describe("Allow refresh-token retries for up to this many seconds after rotation. Zero consumes tokens immediately."),
   scopes: z.array(z.string().trim().min(1)).min(1).default(["devspace"]),
   allowedResourceUrls: z.array(z.string().trim().url().refine((value) => {
     const url = URL.parse(value);
+
     return url !== null && (url.protocol === "https:"
       || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)));
   }, "Resource URLs must use HTTPS, or HTTP on localhost, 127.0.0.1, or [::1]")
@@ -78,6 +83,8 @@ const oauthConfigSchema = z.object({
     .default([]),
   allowedRedirectHosts: z.array(z.string().trim().min(1)).min(1).default([
     "chatgpt.com",
+    "claude.ai",
+    "claude.com",
     "localhost",
     "127.0.0.1",
   ]),
@@ -91,26 +98,24 @@ export const devspaceConfigSchema = z.object({
   storage: storageConfigSchema,
   tools: toolsConfigSchema,
   ui: uiConfigSchema,
+  activity: activityConfigSchema,
   artifacts: artifactsConfigSchema,
   skills: skillsConfigSchema,
-  subagents: subagentsConfigSchema.default({
-    enabled: false,
-    instructions: "on-demand",
-    providers: [],
-  }),
+  // Absent means "never configured", which differs from an explicit `enabled: false`.
+  subagents: subagentsConfigSchema.optional(),
   logging: loggingConfigSchema,
   oauth: oauthConfigSchema,
 }).strict();
 
 export type DevspaceConfig = z.output<typeof devspaceConfigSchema>;
+
 export type DevspaceConfigInput = z.input<typeof devspaceConfigSchema>;
-export type ToolMode = DevspaceConfig["tools"]["mode"];
 
 export function defaultDevspaceConfig(): DevspaceConfig {
   return devspaceConfigSchema.parse({ configVersion: DEVSPACE_CONFIG_VERSION });
 }
 
-export function devspaceConfigJsonSchema(): object {
+export function devspaceConfigJsonSchema() {
   return {
     $id: DEVSPACE_CONFIG_SCHEMA_URL,
     title: "DevSpace configuration",

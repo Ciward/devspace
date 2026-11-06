@@ -9,7 +9,7 @@ import test from "node:test";
 import { loadConfig } from "./config.js";
 import { SqliteOAuthStore } from "./oauth-store.js";
 import { createServer } from "./server.js";
-import { writeTestDevspaceConfig } from "./test-support/config.test.js";
+import { writeTestDevspaceConfig } from "./test-support/config.js";
 
 const legacy = "https://devserver.ciward.dpdns.org";
 const canonical = "https://devserver.ciward.com";

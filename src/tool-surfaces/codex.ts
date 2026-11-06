@@ -1,3 +1,4 @@
+import { optionalFields } from "../json-value.js";
 import * as z from "zod/v4";
 import { applyPatch } from "../apply-patch.js";
 import {
@@ -13,7 +14,6 @@ import {
   type ToolRegistrationContext,
 } from "./types.js";
 import {
-  contentText,
   resultOutputSchema,
   runLoggedToolOperation,
   textBlock,
@@ -41,16 +41,17 @@ const CODEX_REGISTRATIONS: readonly CodexRegistration[] = [
 
 function processResult(snapshot: ProcessSnapshot): string {
   const status = snapshot.running
-    ? `Process running with session ID ${snapshot.sessionId}. MUST call write_stdin immediately with this workspaceId and sessionId; do not summarize or ask the user while it is running.`
+    ? `Process running with session ID ${snapshot.sessionId}.`
     : snapshot.signal
       ? `Process exited after signal ${snapshot.signal}.`
       : `Process exited with code ${snapshot.exitCode ?? "unknown"}.`;
+
   return snapshot.output
     ? `${snapshot.output.replace(/\n$/, "")}\n${status}`
     : status;
 }
 
-function processOutputSchema(): z.ZodRawShape {
+function processOutputSchema(): Parameters<typeof z.object>[0] {
   return resultOutputSchema({
     session_id: z.number().optional(),
     running: z.boolean(),
@@ -58,13 +59,13 @@ function processOutputSchema(): z.ZodRawShape {
     signal: z.string().optional(),
     wall_time_ms: z.number().nonnegative(),
     output_truncated: z.boolean(),
-    next_action: z.literal("write_stdin").optional(),
   });
 }
 
 function processToolResponse(snapshot: ProcessSnapshot) {
   const result = processResult(snapshot);
   const content = [textBlock(result)];
+
   return {
     content,
     structuredContent: {
@@ -75,7 +76,6 @@ function processToolResponse(snapshot: ProcessSnapshot) {
       signal: snapshot.signal,
       wall_time_ms: snapshot.wallTimeMs,
       output_truncated: snapshot.outputTruncated,
-      next_action: snapshot.running ? "write_stdin" : undefined,
     },
   };
 }
@@ -113,15 +113,18 @@ function registerApplyPatchTool(context: ToolRegistrationContext): void {
     async ({ workspace_id, patch }) => {
       const startedAt = performance.now();
       const workspaceId = workspace_id;
+
       const applied = await runLoggedToolOperation(
         config,
         { tool: "apply_patch", workspaceId },
         startedAt,
         async () => {
           const workspace = await workspaces.getWorkspace(workspaceId);
+
           return applyPatch(workspace.root, patch);
         },
       );
+
       const paths = applied.files.map((file) => file.path).join(", ");
       const result = `Applied patch to ${applied.files.length} file(s): ${paths}`;
       const content = [textBlock(result)];
@@ -150,7 +153,7 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
     {
       title: "Execute command",
       description:
-        `Run a command with the local user's authority. Commands are not sandboxed; workspace validation only selects the initial working directory. Returns the result when it exits during the yield window, otherwise returns a session_id for write_stdin. Use this for file inspection, tests, builds, package scripts, and long-running processes. ${WEB_ONLY_SHELL_AGENT_POLICY}`,
+        `Run a shell command with the local user's authority. Returns the result when it exits during the yield window, otherwise returns a session_id for write_stdin. ${WEB_ONLY_SHELL_AGENT_POLICY}`,
       inputSchema: {
         workspace_id: z.string().describe(workspaceIdDescription),
         cmd: z.string().min(1).describe("Shell command to execute."),
@@ -189,13 +192,6 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
           .describe(
             "Milliseconds to wait before returning a running session. Defaults to 10000, maximum 12000. Use write_stdin for work that runs longer.",
           ),
-        timeout_ms: z
-          .number()
-          .int()
-          .min(1_000)
-          .max(3_600_000)
-          .optional()
-          .describe("Maximum total process runtime in milliseconds. Defaults to 300000."),
         max_output_tokens: z
           .number()
           .int()
@@ -215,7 +211,6 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
       rows,
       working_directory,
       yield_time_ms,
-      timeout_ms,
       max_output_tokens,
     }) => {
       const startedAt = performance.now();
@@ -223,21 +218,15 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
       const workingDirectory = working_directory;
       const yieldTimeMs = yield_time_ms;
       const maxOutputTokens = max_output_tokens;
-      const timeoutMs = timeout_ms;
+
       const violation = findWebOnlyCommandViolation(cmd);
       if (violation) {
-        const content = [textBlock(violation)];
-        return {
-          isError: true,
-          content,
-          structuredContent: {
-            result: violation,
-            running: false,
-            wall_time_ms: Math.round(performance.now() - startedAt),
-            output_truncated: false,
-          },
-        };
+        return { isError: true, content: [textBlock(violation)], structuredContent: {
+          result: violation, running: false, wall_time_ms: Math.round(performance.now() - startedAt),
+          output_truncated: false,
+        } };
       }
+
       const snapshot = await runLoggedToolOperation(
         config,
         {
@@ -250,10 +239,12 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
         startedAt,
         async () => {
           const workspace = await workspaces.getWorkspace(workspaceId);
+
           const cwd = await workspaces.resolveWorkingDirectory(
             workspace,
             workingDirectory,
           );
+
           return processSessions.start({
             workspaceId,
             command: cmd,
@@ -263,7 +254,6 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
             columns,
             rows,
             yieldTimeMs,
-            timeoutMs: timeoutMs ?? 300_000,
             maxOutputTokens,
           });
         },
@@ -341,12 +331,14 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
       const sessionId = session_id;
       const yieldTimeMs = yield_time_ms;
       const maxOutputTokens = max_output_tokens;
+
       const snapshot = await runLoggedToolOperation(
         config,
         { tool: "write_stdin", workspaceId },
         startedAt,
         async () => {
           await workspaces.getWorkspace(workspaceId);
+
           return processSessions.write({
             workspaceId,
             sessionId,
@@ -367,14 +359,16 @@ function registerCodexProcessTools(context: ToolRegistrationContext): void {
 
 export function processLogFields(result: ProcessSnapshot): Partial<ToolLogFields> {
   const success = result.running || (!result.signal && result.exitCode === 0);
+
   const termination = result.signal
     ? `Process terminated by signal ${result.signal}.`
     : `Process exited with code ${result.exitCode ?? "unknown"}.`;
+
   return {
     sessionId: result.sessionId,
     running: result.running,
     exitCode: result.exitCode,
     success,
-    ...(success ? {} : { error: termination }),
+    ...optionalFields(success ? undefined : { error: termination }),
   };
 }

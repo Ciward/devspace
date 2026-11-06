@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { migrateDatabase } from "./migrations.js";
 
 interface LegacyDatabaseOptions {
@@ -8,8 +8,8 @@ interface LegacyDatabaseOptions {
   includeConversationBindings?: boolean;
 }
 
-function createLegacyDatabase(options: LegacyDatabaseOptions = {}): Database.Database {
-  const sqlite = new Database(":memory:");
+function createLegacyDatabase(options: LegacyDatabaseOptions = {}): DatabaseSync {
+  const sqlite = new DatabaseSync(":memory:");
   const archiveColumns = options.includeArchiveState
     ? `
       archive_remote text,
@@ -40,6 +40,13 @@ function createLegacyDatabase(options: LegacyDatabaseOptions = {}): Database.Dat
       created_at text not null,
       last_used_at text not null
     );
+    create table local_agent_sessions (
+      id text primary key, workspace_id text, workspace_root text not null,
+      profile_name text not null, provider text not null, model text,
+      effort text, provider_session_id text, status text not null,
+      latest_response text, error text, created_at text not null,
+      updated_at text not null
+    );
   `);
 
   if (options.migration4) {
@@ -69,7 +76,7 @@ function createLegacyDatabase(options: LegacyDatabaseOptions = {}): Database.Dat
   return sqlite;
 }
 
-function assertCombinedMigration(sqlite: Database.Database): void {
+function assertCombinedMigration(sqlite: DatabaseSync): void {
   const columns = sqlite.prepare("pragma table_info(workspace_sessions)").all() as Array<{
     name: string;
   }>;
@@ -82,11 +89,10 @@ function assertCombinedMigration(sqlite: Database.Database): void {
       "select name from sqlite_master where type = 'table' and name = 'workspace_conversation_bindings'",
     )
     .get();
-  assert.deepEqual(conversationTable, { name: "workspace_conversation_bindings" });
-  assert.deepEqual(
-    sqlite.prepare("select version, name from devspace_schema_migrations where version = 8").get(),
-    { version: 8, name: "workspace-and-local-agent-state-convergence" },
-  );
+  assert.equal((conversationTable as { name?: string } | undefined)?.name, "workspace_conversation_bindings");
+  const migration8 = sqlite.prepare("select version, name from devspace_schema_migrations where version = 8").get() as { version: number; name: string };
+  assert.equal(migration8.version, 8);
+  assert.equal(migration8.name, "local-agent-turns");
 
   const agentColumns = sqlite.prepare("pragma table_info(local_agent_sessions)").all() as Array<{
     name: string;
@@ -124,7 +130,7 @@ const unknownHistory = createLegacyDatabase();
 try {
   unknownHistory.exec("insert into devspace_schema_migrations values (4, 'unknown-lineage', '2026-01-01')");
   assert.throws(() => migrateDatabase(unknownHistory), /history is incompatible/);
-  assert.equal(unknownHistory.prepare("select name from devspace_schema_migrations where version = 4").pluck().get(), "unknown-lineage");
+  assert.equal((unknownHistory.prepare("select name from devspace_schema_migrations where version = 4").get() as { name: string }).name, "unknown-lineage");
 } finally {
   unknownHistory.close();
 }

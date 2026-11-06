@@ -1,3 +1,4 @@
+import type { JsonObject } from "../json-value.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ProcessSessionManager } from "../process-sessions.js";
 import type { ServerConfig } from "../config.js";
@@ -77,7 +78,7 @@ export interface ToolDefinitionMeta extends Record<string, unknown> {
   };
 }
 
-export type EmptyToolDefinitionMeta = Record<string, unknown> & {
+export type EmptyToolDefinitionMeta = JsonObject & {
   "ui/resourceUri"?: string;
 };
 
@@ -96,6 +97,8 @@ export interface ToolInstructionContext {
   agents: string;
   skills: string;
 }
+
+export type ToolSurfaceName = "codex" | "claude" | "full";
 
 export interface ToolSurface {
   register(context: ToolRegistrationContext): void;

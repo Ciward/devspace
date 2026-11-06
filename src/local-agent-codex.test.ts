@@ -2,94 +2,31 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import test, { type TestContext } from "node:test";
 import {
   CodexAppServerRuntime,
   CodexLocalAgentDriver,
-  codexServerRequestResult,
   codexCommandEnvironment,
   parseCodexVersion,
   resolveCodexCommand,
   sandboxFor,
 } from "./local-agent-codex.js";
 import { toAgentErrorPayload } from "./local-agent-errors.js";
+import { providerErrorDetail } from "./local-agent-events.js";
 
-const cachedContext = { agentId: "agt_test", provider: "codex" as const, workspaceRoot: "/tmp/project" };
+const cachedContext = {
+  agentId: "agt_test",
+  providerInstanceId: "codex",
+  provider: "codex" as const,
+  workspaceRoot: "/tmp/project",
+};
 
-assert.equal(parseCodexVersion("codex-cli 0.9.1"), "0.9.1");
-assert.equal(sandboxFor("read_only"), "danger-full-access");
-assert.equal(sandboxFor("allowed"), "danger-full-access");
-assert.equal(sandboxFor("full_access"), "danger-full-access");
-assert.deepEqual(
-  codexServerRequestResult("item/commandExecution/requestApproval", {}, "allowed"),
-  { decision: "accept" },
-);
-assert.deepEqual(
-  codexServerRequestResult("item/fileChange/requestApproval", {}, "full_access"),
-  { decision: "accept" },
-);
-assert.deepEqual(
-  codexServerRequestResult("execCommandApproval", {}, "read_only"),
-  { decision: "approved" },
-);
-assert.deepEqual(
-  codexServerRequestResult("applyPatchApproval", {}, "read_only"),
-  { decision: "approved" },
-);
-assert.deepEqual(
-  codexServerRequestResult(
-    "item/permissions/requestApproval",
-    { permissions: { network: { enabled: true } } },
-    "allowed",
-  ),
-  {
-    permissions: { network: { enabled: true } },
-    scope: "session",
-    strictAutoReview: false,
-  },
-);
-assert.deepEqual(
-  codexServerRequestResult("item/commandExecution/requestApproval", {}, "read_only"),
-  { decision: "accept" },
-);
-assert.equal(
-  codexCommandEnvironment({ CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "test", PATH: "/tmp/bin" }).CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
-  undefined,
-);
-
-if (process.platform !== "win32") {
-  const root = await mkdtemp(join(tmpdir(), "devspace-codex-app-server-test-"));
-  const badBin = join(root, "bad-bin");
-  const goodBin = join(root, "good-bin");
-  await mkdir(badBin);
-  await mkdir(goodBin);
-  const badCandidate = join(badBin, "codex");
-  const goodCandidate = join(goodBin, "codex");
-  await writeFile(badCandidate, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
-  await writeFile(goodCandidate, "#!/bin/sh\necho 'codex-cli 9.8.7'\n", { mode: 0o700 });
-  await chmod(badCandidate, 0o700);
-  await chmod(goodCandidate, 0o700);
-  assert.deepEqual(
-    resolveCodexCommand({ PATH: `${badBin}:${goodBin}` }),
-    { executable: goodCandidate, version: "9.8.7" },
-    "command resolution must skip candidates whose version probe exits non-zero",
-  );
-
-  const command = join(root, "fake-codex");
-  await writeFile(command, `#!/usr/bin/env node
+const fakeCodexScript = `#!/usr/bin/env node
 import readline from "node:readline";
 let turn = 0;
-const approvals = new Map();
 const output = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
-  if (!message.method && approvals.has(String(message.id))) {
-    const pending = approvals.get(String(message.id));
-    approvals.delete(String(message.id));
-    const decision = message.result?.decision || "error";
-    const item = { type: "agentMessage", text: "approval " + decision };
-    output({ method: "turn/completed", params: { threadId: pending.threadId, turn: { id: pending.turnId, status: "completed", items: [item] } } });
-    return;
-  }
   if (message.method === "initialize") {
     output({ id: message.id, result: { userAgent: "fake" } });
     return;
@@ -107,30 +44,22 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const turnId = "turn_" + turn;
     output({ id: message.id, result: { turn: { id: turnId } } });
     setImmediate(() => {
-      if (message.params.input[0].text === "approve ssh" || message.params.input[0].text === "approve remote agent") {
-        const approvalId = "approval_" + turn;
-        approvals.set(approvalId, { threadId: message.params.threadId, turnId });
-        output({
-          id: approvalId,
-          method: "item/commandExecution/requestApproval",
-          params: {
-            threadId: message.params.threadId,
-            turnId,
-            itemId: "item_" + turn,
-            startedAtMs: Date.now(),
-            command: message.params.input[0].text === "approve ssh"
-              ? "ssh TokenLabOVH hostname"
-              : "ssh TokenLabOVH 'codex exec deploy'",
-          },
-        });
-        return;
-      }
       if (message.params.input[0].text === "fail") {
         output({ method: "turn/completed", params: { threadId: message.params.threadId, turn: { id: turnId, status: "failed", error: { message: "fake failure" } } } });
         return;
       }
       if (message.params.input[0].text === "empty") {
         output({ method: "turn/completed", params: { threadId: message.params.threadId, turn: { id: turnId, status: "completed", items: [] } } });
+        return;
+      }
+      if (message.params.input[0].text === "tools") {
+        const threadId = message.params.threadId;
+        const command = { type: "commandExecution", id: "cmd_1", command: "pnpm test", status: "inProgress" };
+        const reply = { type: "agentMessage", text: "Tests fail." };
+        output({ method: "item/started", params: { threadId, turnId, item: command } });
+        output({ method: "item/completed", params: { threadId, turnId, item: { ...command, status: "failed", exitCode: 1 } } });
+        output({ method: "item/completed", params: { threadId, turnId, item: reply } });
+        output({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [reply] } } });
         return;
       }
       if (message.params.input[0].text === "notLoaded") {
@@ -147,106 +76,186 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
   }
 });
-`, { mode: 0o700 });
-  await chmod(command, 0o700);
+`;
 
+async function codexFixture(t: TestContext) {
+  const root = await mkdtemp(join(tmpdir(), "devspace-codex-app-server-test-"));
+  const command = join(root, "fake-codex");
+  await writeFile(command, fakeCodexScript, { mode: 0o700 });
+  await chmod(command, 0o700);
   const runtime = new CodexAppServerRuntime({ command, env: process.env });
-  try {
-    await runtime.initialize();
-    let callbackSessionId: string | undefined;
-    const firstResult = await runtime.run({
-      prompt: "first",
-      workspaceRoot: "/tmp/project",
-      writeMode: "read_only",
-      model: "gpt-5.4",
-      effort: "high",
-    }, { onSessionId: (id) => { callbackSessionId = id; } });
-    assert.equal(firstResult.isOk(), true);
-    if (firstResult.isErr()) throw firstResult.error;
-    const first = firstResult.value;
-    const resumedResult = await runtime.run({
-      prompt: "resumed",
-      workspaceRoot: "/tmp/project",
-      providerSessionId: first.providerSessionId ?? undefined,
-    });
-    assert.equal(resumedResult.isOk(), true);
-    if (resumedResult.isErr()) throw resumedResult.error;
-    const resumed = resumedResult.value;
-    assert.equal(first.providerSessionId, "thread_new");
-    assert.equal(callbackSessionId, "thread_new");
-    assert.equal(first.finalResponse, "fake response 1");
-    assert.equal(resumed.providerSessionId, "thread_new");
-    assert.equal(resumed.finalResponse, "fake response 2");
-    const approved = await runtime.run({
-      prompt: "approve ssh",
-      workspaceRoot: "/tmp/project",
-      providerSessionId: first.providerSessionId ?? undefined,
-      writeMode: "allowed",
-    });
-    assert.equal(approved.isOk(), true);
-    if (approved.isErr()) throw approved.error;
-    assert.equal(approved.value.finalResponse, "approval accept");
-    const remoteAgentApproval = await runtime.run({
-      prompt: "approve remote agent",
-      workspaceRoot: "/tmp/project",
-      providerSessionId: first.providerSessionId ?? undefined,
-      writeMode: "allowed",
-    });
-    assert.equal(remoteAgentApproval.isOk(), true);
-    if (remoteAgentApproval.isErr()) throw remoteAgentApproval.error;
-    assert.equal(remoteAgentApproval.value.finalResponse, "approval accept");
-    const failed = await runtime.run({
-      prompt: "fail",
-      workspaceRoot: "/tmp/project",
-      providerSessionId: first.providerSessionId ?? undefined,
-    });
-    assert.equal(failed.isErr(), true);
-    if (failed.isErr()) {
-      assert.equal(failed.error.code, "PROVIDER_EXECUTION_ERROR");
-      assert.equal(failed.error.provider, "codex");
-      assert.equal(failed.error.retryable, false);
-    }
-    const protocolFailure = await runtime.run({
-      prompt: "empty",
-      workspaceRoot: "/tmp/project",
-      providerSessionId: first.providerSessionId ?? undefined,
-    });
-    assert.equal(protocolFailure.isErr(), true);
-    if (protocolFailure.isErr()) {
-      assert.equal(protocolFailure.error.code, "PROVIDER_PROTOCOL_ERROR");
-      assert.equal(protocolFailure.error.provider, "codex");
-      assert.equal(protocolFailure.error.retryable, false);
-      assert.ok(protocolFailure.error.cause, "provider protocol cause remains available internally");
-      assert.equal("cause" in toAgentErrorPayload(protocolFailure.error), false);
-    }
-    const notLoaded = await runtime.run({
-      prompt: "notLoaded",
-      workspaceRoot: "/tmp/project",
-      providerSessionId: first.providerSessionId ?? undefined,
-    });
-    assert.equal(notLoaded.isOk(), true, "empty turn.items must fall back to item/completed stream items");
-    if (notLoaded.isErr()) throw notLoaded.error;
-    assert.equal(notLoaded.value.finalResponse, "CODEXOK");
-    const policy = await runtime.run({
-      prompt: "policy",
-      workspaceRoot: "/tmp/project",
-      writeMode: "allowed",
-      providerSessionId: first.providerSessionId ?? undefined,
-    });
-    assert.equal(policy.isOk(), true);
-    if (policy.isErr()) throw policy.error;
-    assert.deepEqual(JSON.parse(policy.value.finalResponse), { type: "dangerFullAccess" });
-    await runtime.releaseSession("thread_new");
-  } finally {
+  t.after(async () => {
     await runtime.close();
     await runtime.close();
     await rm(root, { recursive: true, force: true });
-  }
+  });
+  await runtime.initialize();
+
+  return runtime;
 }
 
-const unavailable = await new CodexLocalAgentDriver({}, () => undefined).createRuntime(cachedContext);
-assert.equal(unavailable.isErr(), true);
-if (unavailable.isErr()) {
-  assert.equal(unavailable.error.code, "PROVIDER_UNAVAILABLE");
-  assert.equal(unavailable.error.retryable, false);
-}
+const skipOnWindows = { skip: process.platform === "win32" };
+
+test("codex version, sandbox, and command environment helpers", () => {
+  assert.equal(parseCodexVersion("codex-cli 0.9.1"), "0.9.1");
+  assert.equal(sandboxFor("read_only"), "read-only");
+  assert.equal(sandboxFor("allowed"), "workspace-write");
+  assert.equal(sandboxFor("full_access"), "danger-full-access");
+  assert.equal(
+    codexCommandEnvironment({ CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "test", PATH: "/tmp/bin" }).CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
+    undefined,
+  );
+});
+
+test("command resolution skips candidates whose version probe exits non-zero", skipOnWindows, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "devspace-codex-app-server-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const badBin = join(root, "bad-bin");
+  const goodBin = join(root, "good-bin");
+  await mkdir(badBin);
+  await mkdir(goodBin);
+  const badCandidate = join(badBin, "codex");
+  const goodCandidate = join(goodBin, "codex");
+  await writeFile(badCandidate, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  await writeFile(goodCandidate, "#!/bin/sh\necho 'codex-cli 9.8.7'\n", { mode: 0o700 });
+  await chmod(badCandidate, 0o700);
+  await chmod(goodCandidate, 0o700);
+  assert.deepEqual(
+    resolveCodexCommand({ PATH: `${badBin}:${goodBin}` }),
+    { executable: goodCandidate, version: "9.8.7" },
+    "command resolution must skip candidates whose version probe exits non-zero",
+  );
+});
+
+test("a new thread is reported, resumed, and released", skipOnWindows, async (t) => {
+  const runtime = await codexFixture(t);
+  let callbackSessionId: string | undefined;
+
+  const firstResult = await runtime.run({
+    prompt: "first",
+    workspaceRoot: "/tmp/project",
+    writeMode: "read_only",
+    model: "gpt-5.4",
+    effort: "high",
+  }, { onSessionId: (id) => { callbackSessionId = id; } });
+
+  assert.equal(firstResult.isOk(), true);
+
+  if (firstResult.isErr()) throw firstResult.error;
+  const first = firstResult.value;
+
+  const resumedResult = await runtime.run({
+    prompt: "resumed",
+    workspaceRoot: "/tmp/project",
+    providerSessionId: first.providerSessionId ?? undefined,
+  });
+
+  assert.equal(resumedResult.isOk(), true);
+
+  if (resumedResult.isErr()) throw resumedResult.error;
+  const resumed = resumedResult.value;
+  assert.equal(first.providerSessionId, "thread_new");
+  assert.equal(callbackSessionId, "thread_new");
+  assert.equal(first.finalResponse, "fake response 1");
+  assert.equal(resumed.providerSessionId, "thread_new");
+  assert.equal(resumed.finalResponse, "fake response 2");
+  await runtime.releaseSession("thread_new");
+});
+
+test("a failed turn is a non-retryable provider execution error", skipOnWindows, async (t) => {
+  const runtime = await codexFixture(t);
+
+  const failed = await runtime.run({
+    prompt: "fail",
+    workspaceRoot: "/tmp/project",
+    providerSessionId: "thread_new",
+  });
+
+  assert.equal(failed.isErr(), true);
+
+  if (failed.isErr()) {
+    assert.equal(failed.error.code, "PROVIDER_EXECUTION_ERROR");
+    assert.equal(failed.error.provider, "codex");
+    assert.equal(failed.error.retryable, false);
+    assert.equal(providerErrorDetail(failed.error), "fake failure");
+  }
+});
+
+test("command items stream as tool events before the final message", skipOnWindows, async (t) => {
+  const runtime = await codexFixture(t);
+  const codexEvents: unknown[] = [];
+
+  const tools = await runtime.run({
+    prompt: "tools",
+    workspaceRoot: "/tmp/project",
+    providerSessionId: "thread_new",
+  }, { onEvent: (event) => { codexEvents.push(event); } });
+
+  assert.equal(tools.isOk() && tools.value.finalResponse, "Tests fail.");
+  assert.deepEqual(codexEvents, [
+    { type: "tool_started", tool: "shell", summary: "pnpm test" },
+    { type: "tool_completed", tool: "shell", summary: "pnpm test", status: "failed" },
+    { type: "message", text: "Tests fail." },
+  ]);
+});
+
+test("a turn without a final message is a protocol error that keeps its cause internal", skipOnWindows, async (t) => {
+  const runtime = await codexFixture(t);
+
+  const protocolFailure = await runtime.run({
+    prompt: "empty",
+    workspaceRoot: "/tmp/project",
+    providerSessionId: "thread_new",
+  });
+
+  assert.equal(protocolFailure.isErr(), true);
+
+  if (protocolFailure.isErr()) {
+    assert.equal(protocolFailure.error.code, "PROVIDER_PROTOCOL_ERROR");
+    assert.equal(protocolFailure.error.provider, "codex");
+    assert.equal(protocolFailure.error.retryable, false);
+    assert.ok(protocolFailure.error.cause, "provider protocol cause remains available internally");
+    assert.equal("cause" in toAgentErrorPayload(protocolFailure.error), false);
+  }
+});
+
+test("empty turn items fall back to item/completed stream items", skipOnWindows, async (t) => {
+  const runtime = await codexFixture(t);
+
+  const notLoaded = await runtime.run({
+    prompt: "notLoaded",
+    workspaceRoot: "/tmp/project",
+    providerSessionId: "thread_new",
+  });
+
+  assert.equal(notLoaded.isOk(), true, "empty turn.items must fall back to item/completed stream items");
+
+  if (notLoaded.isErr()) throw notLoaded.error;
+  assert.equal(notLoaded.value.finalResponse, "CODEXOK");
+});
+
+test("allowed mode sends a workspace-write sandbox policy with network access", skipOnWindows, async (t) => {
+  const runtime = await codexFixture(t);
+
+  const policy = await runtime.run({
+    prompt: "policy",
+    workspaceRoot: "/tmp/project",
+    writeMode: "allowed",
+    providerSessionId: "thread_new",
+  });
+
+  assert.equal(policy.isOk(), true);
+
+  if (policy.isErr()) throw policy.error;
+  assert.deepEqual(JSON.parse(policy.value.finalResponse), { type: "workspaceWrite", networkAccess: true });
+});
+
+test("a driver without a resolvable command is unavailable", async () => {
+  const unavailable = await new CodexLocalAgentDriver({}, () => undefined).createRuntime(cachedContext);
+  assert.equal(unavailable.isErr(), true);
+
+  if (unavailable.isErr()) {
+    assert.equal(unavailable.error.code, "PROVIDER_UNAVAILABLE");
+    assert.equal(unavailable.error.retryable, false);
+  }
+});
