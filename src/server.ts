@@ -223,6 +223,9 @@ const projectCandidateOutputSchema = z.object({
 export const DEVSPACE_HTTP_KEEP_ALIVE_TIMEOUT_MS = 5 * 60 * 1_000;
 
 export function configureHttpServer(httpServer: HttpServer): void {
+  httpServer.requestTimeout = 0;
+  httpServer.setTimeout(0);
+  httpServer.headersTimeout = 0;
   httpServer.keepAliveTimeout = DEVSPACE_HTTP_KEEP_ALIVE_TIMEOUT_MS;
 }
 
@@ -1343,6 +1346,7 @@ export function createServer(
     return adapter.server;
   }, {
     legacy: "stateless",
+    responseMode: config.mcpJsonResponses ? "json" : "auto",
     onerror: logMcpHandlerError,
   });
 

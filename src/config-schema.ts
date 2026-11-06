@@ -16,6 +16,10 @@ const serverConfigSchema = z.object({
   })).default([]),
   allowedHosts: z.array(z.string().trim().min(1)).default([]),
   trustProxy: z.union([z.boolean(), z.literal("loopback")]).default(false),
+  mcpSessionIdleTimeoutMs: z.number().int().min(30_000).max(86_400_000).default(86_400_000),
+  mcpSessionCleanupIntervalMs: z.number().int().min(1_000).max(3_600_000).default(300_000),
+  mcpSessionMaxCount: z.number().int().min(1).max(10_000).default(1_024),
+  mcpJsonResponses: z.boolean().default(false),
 }).strict().prefault({});
 
 const workspacesConfigSchema = z.object({
@@ -34,6 +38,8 @@ const toolsConfigSchema = z.object({
     description:
       "Optional override. When unset, DevSpace picks the tool surface from the connecting MCP host.",
   }),
+  resumableBash: z.boolean().default(false),
+  resumableBashYieldMs: z.number().int().min(0).max(30_000).default(10_000),
 }).strict().prefault({});
 
 const uiConfigSchema = z.object({

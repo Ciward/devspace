@@ -33,6 +33,9 @@ export interface ServerConfig extends AgentConfig {
   worktreeArchiveRemote: string;
   /** Explicit `tools.mode`; when set it wins over host detection. */
   toolSurfaceOverride: "claude" | "codex" | "full" | undefined;
+  resumableBash: boolean;
+  resumableBashYieldMs: number;
+  mcpJsonResponses: boolean;
   experimentalCodeMode: boolean;
   uiEnabled: boolean;
   activity: { enabled: boolean; maxTurns: number };
@@ -60,9 +63,9 @@ function agentConfig(files: DevspaceFiles, env: NodeJS.ProcessEnv, subagents: Su
 
   return {
     configDir: files.dir,
-    allowedRoots: normalizePaths(stored.workspaces.allowedRoots, [process.cwd()]),
-    stateDir: normalizePath(stored.storage.stateDir),
-    worktreeRoot: normalizePath(stored.workspaces.worktreeRoot),
+    allowedRoots: normalizePaths(parseList(env.DEVSPACE_ALLOWED_ROOTS) ?? stored.workspaces.allowedRoots, [process.cwd()]),
+    stateDir: normalizePath(env.DEVSPACE_STATE_DIR?.trim() || stored.storage.stateDir),
+    worktreeRoot: normalizePath(env.DEVSPACE_WORKTREE_ROOT?.trim() || stored.workspaces.worktreeRoot),
     devspaceAgentsDir: devspaceAgentsDir(env),
     subagents,
     agentDir: normalizePath(stored.skills.agentDir),
@@ -73,8 +76,13 @@ function agentConfig(files: DevspaceFiles, env: NodeJS.ProcessEnv, subagents: Su
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const files = loadDevspaceFiles(env);
   const stored = files.config;
-  const host = stored.server.host;
-  const port = stored.server.port;
+  const subagents = resolveSubagentsConfig(stored.subagents ?? disabledSubagentsConfig());
+  if (env.DEVSPACE_SUBAGENTS !== undefined) subagents.enabled = parseBoolean(env.DEVSPACE_SUBAGENTS);
+  if (env.DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS !== undefined) {
+    subagents.maxConcurrentTurns = parseInteger(env.DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS, "DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS", 1, 32);
+  }
+  const host = env.HOST?.trim() || stored.server.host;
+  const port = env.PORT === undefined ? stored.server.port : parseInteger(env.PORT, "PORT", 1, 65_535);
 
   const publicBaseUrl = parsePublicBaseUrl(
     env.DEVSPACE_PUBLIC_BASE_URL?.trim() || stored.server.publicBaseUrl || localPublicBaseUrl(host, port),
@@ -96,41 +104,63 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   ];
 
   return {
-    ...agentConfig(files, env, resolveSubagentsConfig(stored.subagents ?? disabledSubagentsConfig())),
+    ...agentConfig(files, env, subagents),
     host,
     port,
     oauth: {
       ownerToken: parseRequiredSecret(
         env.DEVSPACE_OAUTH_OWNER_TOKEN ?? files.auth.ownerToken,
       ),
-      accessTokenTtlSeconds: stored.oauth.accessTokenTtlSeconds,
-      refreshTokenTtlSeconds: stored.oauth.refreshTokenTtlSeconds,
+      accessTokenTtlSeconds: env.DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS === undefined
+        ? stored.oauth.accessTokenTtlSeconds : parseInteger(env.DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS, "DEVSPACE_OAUTH_ACCESS_TOKEN_TTL_SECONDS", 1),
+      refreshTokenTtlSeconds: env.DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS === undefined
+        ? stored.oauth.refreshTokenTtlSeconds : parseInteger(env.DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS, "DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS", 1),
       refreshTokenGraceSeconds: stored.oauth.refreshTokenGraceSeconds,
-      scopes: stored.oauth.scopes,
+      scopes: parseList(env.DEVSPACE_OAUTH_SCOPES) ?? stored.oauth.scopes,
       allowedResourceUrls: stored.oauth.allowedResourceUrls,
-      allowedRedirectHosts: stored.oauth.allowedRedirectHosts,
+      allowedRedirectHosts: parseList(env.DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS) ?? stored.oauth.allowedRedirectHosts,
     },
-    allowedHosts: normalizeAllowedHosts(derivedAllowedHosts),
+    allowedHosts: normalizeAllowedHosts(parseList(env.DEVSPACE_ALLOWED_HOSTS) ?? derivedAllowedHosts),
     publicBaseUrl,
     publicBaseUrlAliases,
     worktreeMaxCount: env.DEVSPACE_WORKTREE_MAX_COUNT === undefined
-      ? stored.workspaces.worktreeMaxCount : Number(env.DEVSPACE_WORKTREE_MAX_COUNT),
+      ? stored.workspaces.worktreeMaxCount : parseInteger(env.DEVSPACE_WORKTREE_MAX_COUNT, "DEVSPACE_WORKTREE_MAX_COUNT", 0, 10_000),
     worktreeArchiveRemote: env.DEVSPACE_WORKTREE_ARCHIVE_REMOTE?.trim() || stored.workspaces.worktreeArchiveRemote,
     toolSurfaceOverride: env.DEVSPACE_TOOL_MODE === undefined
       ? stored.tools.mode : zToolMode(env.DEVSPACE_TOOL_MODE),
+    resumableBash: env.DEVSPACE_RESUMABLE_BASH === undefined
+      ? stored.tools.resumableBash : parseBoolean(env.DEVSPACE_RESUMABLE_BASH),
+    resumableBashYieldMs: env.DEVSPACE_RESUMABLE_BASH_YIELD_MS === undefined
+      ? stored.tools.resumableBashYieldMs : parseInteger(env.DEVSPACE_RESUMABLE_BASH_YIELD_MS, "DEVSPACE_RESUMABLE_BASH_YIELD_MS", 0, 30_000),
+    mcpJsonResponses: env.DEVSPACE_MCP_JSON_RESPONSES === undefined
+      ? stored.server.mcpJsonResponses : parseBoolean(env.DEVSPACE_MCP_JSON_RESPONSES),
     experimentalCodeMode: env.DEVSPACE_EXPERIMENTAL_CODE_MODE === "1",
-    uiEnabled: stored.ui.enabled,
+    uiEnabled: env.DEVSPACE_WIDGETS === undefined ? stored.ui.enabled : env.DEVSPACE_WIDGETS !== "off",
     activity: stored.activity,
-    artifactsEnabled: stored.artifacts.enabled,
+    artifactsEnabled: env.DEVSPACE_ARTIFACTS === undefined ? stored.artifacts.enabled : parseBoolean(env.DEVSPACE_ARTIFACTS),
     artifactMaxFileBytes: stored.artifacts.maxFileBytes,
-    skillsEnabled: stored.skills.enabled,
-    skillPaths: stored.skills.paths,
+    skillsEnabled: env.DEVSPACE_SKILLS === undefined ? stored.skills.enabled : parseBoolean(env.DEVSPACE_SKILLS),
+    skillPaths: parseList(env.DEVSPACE_SKILL_PATHS) ?? stored.skills.paths,
     devspaceSkillsDir: devspaceSkillsDir(env),
     logging: {
       ...stored.logging,
-      trustProxy: stored.server.trustProxy,
+      trustProxy: env.DEVSPACE_TRUST_PROXY === undefined ? stored.server.trustProxy : parseBoolean(env.DEVSPACE_TRUST_PROXY),
     },
   };
+}
+
+function parseList(value: string | undefined): string[] | undefined {
+  return value?.split(",").map((part) => part.trim()).filter(Boolean);
+}
+
+function parseBoolean(value: string): boolean {
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
+function parseInteger(value: string, name: string, min: number, max = Number.MAX_SAFE_INTEGER): number {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < min || number > max) throw new Error(`Invalid ${name}: ${value}`);
+  return number;
 }
 
 function zToolMode(value: string): "claude" | "codex" | "full" {

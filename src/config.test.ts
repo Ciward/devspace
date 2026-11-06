@@ -44,6 +44,43 @@ test("DEVSPACE_EXPERIMENTAL_CODE_MODE toggles experimental code mode", (t) => {
   assert.equal(loadConfig({ ...env, DEVSPACE_EXPERIMENTAL_CODE_MODE: "0" }).experimentalCodeMode, false);
 });
 
+test("DevServer environment keeps the Cheap tool and workspace configuration", (t) => {
+  const { env } = serverConfigDir(t);
+  const config = loadConfig({ ...env,
+    HOST: "0.0.0.0", PORT: "7677",
+    DEVSPACE_PUBLIC_BASE_URL: "https://devserver.example.com",
+    DEVSPACE_PUBLIC_BASE_URL_ALIASES: "https://old.example.com",
+    DEVSPACE_ALLOWED_ROOTS: "/tmp/devserver-work",
+    DEVSPACE_ALLOWED_HOSTS: "localhost,devserver.example.com,old.example.com",
+    DEVSPACE_STATE_DIR: "/tmp/devserver-state",
+    DEVSPACE_WORKTREE_ROOT: "/tmp/devserver-trees",
+    DEVSPACE_WORKTREE_MAX_COUNT: "10",
+    DEVSPACE_TOOL_MODE: "full",
+    DEVSPACE_RESUMABLE_BASH: "1",
+    DEVSPACE_RESUMABLE_BASH_YIELD_MS: "5000",
+    DEVSPACE_MCP_JSON_RESPONSES: "1",
+    DEVSPACE_SUBAGENTS: "1",
+    DEVSPACE_SUBAGENT_MAX_CONCURRENT_TURNS: "2",
+    DEVSPACE_TRUST_PROXY: "1",
+  });
+  assert.equal(config.host, "0.0.0.0");
+  assert.equal(config.port, 7677);
+  assert.equal(config.publicBaseUrl, "https://devserver.example.com");
+  assert.deepEqual(config.publicBaseUrlAliases, ["https://old.example.com"]);
+  assert.deepEqual(config.allowedHosts, ["localhost", "devserver.example.com", "old.example.com"]);
+  assert.deepEqual(config.allowedRoots, ["/tmp/devserver-work"]);
+  assert.equal(config.stateDir, "/tmp/devserver-state");
+  assert.equal(config.worktreeRoot, "/tmp/devserver-trees");
+  assert.equal(config.toolSurfaceOverride, "full");
+  assert.equal(config.resumableBash, true);
+  assert.equal(config.resumableBashYieldMs, 5000);
+  assert.equal(config.mcpJsonResponses, true);
+  assert.equal(config.subagents.enabled, true);
+  assert.equal(config.subagents.maxConcurrentTurns, 2);
+  assert.equal(config.logging.trustProxy, true);
+  assert.equal(config.oauth.ownerToken, ownerToken);
+});
+
 test("the config file and persisted auth configure the server, and the env owner token wins", (t) => {
   const { configDir, env } = serverConfigDir(t);
   writeDevspaceConfig({

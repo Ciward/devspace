@@ -20,6 +20,9 @@ const config: ServerConfig = {
   port: 7676,
   publicBaseUrl: "https://devspace.example.com",
   publicBaseUrlAliases: [],
+  mcpJsonResponses: false,
+  resumableBash: false,
+  resumableBashYieldMs: 10_000,
   allowedRoots: [
     "/Users/alice/work",
     "/Users/alice/personal/open-source",

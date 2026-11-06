@@ -22,6 +22,7 @@ import {
   textBlock,
 } from "./shared.js";
 import { findWebOnlyCommandViolation, WEB_ONLY_SHELL_AGENT_POLICY } from "../web-only-policy.js";
+import type { ProcessSnapshot } from "../process-sessions.js";
 
 const CLAUDE_INSTRUCTIONS = `Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.`;
 
@@ -181,7 +182,7 @@ function registerClaudeMutationTools(context: ToolRegistrationContext): void {
 }
 
 function registerShellTool(context: ToolRegistrationContext): void {
-  const { server, config, workspaces } = context;
+  const { server, config, workspaces, processSessions } = context;
 
   server.registerTool(
     toolNames.shell,
@@ -206,7 +207,12 @@ function registerShellTool(context: ToolRegistrationContext): void {
           .optional()
           .describe("Timeout in seconds. Defaults to 30, max 300."),
       },
-      outputSchema: resultOutputSchema(),
+      outputSchema: config.resumableBash ? resultOutputSchema({
+        session_id: z.number().optional(), running: z.boolean(),
+        exit_code: z.number().int().optional(), signal: z.string().optional(),
+        wall_time_ms: z.number().nonnegative(), output_truncated: z.boolean(),
+        next_action: z.literal("write_stdin").optional(),
+      }) : resultOutputSchema(),
       annotations: SHELL_TOOL_ANNOTATIONS,
     },
     async ({ workspace_id, working_directory, ...input }) => {
@@ -229,6 +235,23 @@ function registerShellTool(context: ToolRegistrationContext): void {
         workspace,
         workingDirectory,
       );
+
+      if (config.resumableBash) {
+        const snapshot: ProcessSnapshot = await processSessions.start({
+          workspaceId, command: input.command, cwd, workspaceRoot: workspace.root,
+          yieldTimeMs: Math.min(config.resumableBashYieldMs, 12_000),
+        });
+        const result = snapshot.output || (snapshot.running ? "Process is running." : "Process completed.");
+        logToolCall(config, { tool: toolNames.shell, workspaceId, workingDirectory: workingDirectory ?? ".",
+          command: input.command, commandLength: input.command.length, success: true,
+          durationMs: Math.round(performance.now() - startedAt) });
+        return { content: [textBlock(result)], structuredContent: {
+          result, session_id: snapshot.sessionId, running: snapshot.running,
+          exit_code: snapshot.exitCode, signal: snapshot.signal,
+          wall_time_ms: snapshot.wallTimeMs, output_truncated: snapshot.outputTruncated,
+          next_action: snapshot.running ? "write_stdin" as const : undefined,
+        } };
+      }
 
       const response = await runShellTool(input, {
         cwd,
